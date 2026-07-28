@@ -19,6 +19,14 @@ from .fundamentals import (
     search_companies,
     search_companies_sync,
 )
+from .signals import (
+    StockNotFoundError,
+    signals providerError,
+    signals providerScraper,
+    signals providerSignalsResult,
+    scrape_signals,
+    scrape_signals_sync,
+)
 
 __all__ = [
     "CompressionError",
@@ -32,8 +40,14 @@ __all__ = [
     "SearchError",
     "SearchResult",
     "SourceResult",
+    "StockNotFoundError",
+    "signals providerError",
+    "signals providerScraper",
+    "signals providerSignalsResult",
     "scrape_company",
     "scrape_company_sync",
+    "scrape_signals",
+    "scrape_signals_sync",
     "search_and_scrape",
     "search_companies",
     "search_companies_sync",
