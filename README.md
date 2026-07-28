@@ -74,25 +74,39 @@ Midas also ships a structured scraper for
 ```python
 from midas import scrape_company_sync
 
-result = scrape_company_sync("RELIANCE", include_chart=True)
+result = scrape_company_sync(
+    "RELIANCE",
+    include_chart=True,
+    include_concalls=True,  # download latest transcript PDFs + Ollama summary
+)
 print(result.summary())
-print(result.page.quarters.numeric_rows["Sales"])
-print(result.page.peers[:3])
+print(result.page.chart_insights.bullets)  # agent-friendly chart stats
+print(result.page.concall_transcripts[0].summary)
+print(result.agent_brief())                # markdown for an LLM
+# or: result.agent_payload()               # compact JSON (no daily ticks)
 ```
 
 CLI:
 
 ```bash
 uv run python examples/scrape_fundamentals.py RELIANCE
+uv run python examples/scrape_fundamentals.py TCS --chart             # + chart insights
+uv run python examples/scrape_fundamentals.py TCS --concalls          # + transcript PDFs
+uv run python examples/scrape_fundamentals.py TCS --concalls --no-concall-summary  # extract only
+uv run python examples/scrape_fundamentals.py TCS --agent             # brief + chart + concalls
+uv run python examples/scrape_fundamentals.py TCS --agent-json tcs_agent.json
 uv run python examples/scrape_fundamentals.py TCS --consolidated --both --json tcs.json
-uv run python examples/scrape_fundamentals.py TCS --json              # full JSON on stdout
 uv run python examples/scrape_fundamentals.py --search "tata motors"
 ```
 
 It extracts profile/ratios, pros & cons, sector path, quarterly + annual statements,
 balance sheet, cash flow, ratios, growth CAGRs, shareholding, peers, announcements,
-annual reports, credit ratings, and concalls. Optional chart series and schedule
-breakdowns use Screener’s public AJAX endpoints. Be polite with request volume.
+annual reports, credit ratings, and concall **links**. With `--chart` /
+`include_chart=True`, it also pulls Price / 50-DMA / 200-DMA / Volume and derives
+returns, drawdown, DMA regime, and volume stats for agents. With `--concalls` /
+`include_concalls=True`, it downloads the latest transcript PDFs, extracts text, and
+summarizes them with the same Ollama model used by web search (guidance, margins,
+capex, risks, Q&A). Be polite with request volume.
 
 ## Development
 
