@@ -1,0 +1,40 @@
+[project]
+name = "midas"
+version = "0.1.0"
+description = "Search, scrape, clean, and compress web research."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "camoufox>=0.5.4",
+    "ddgs>=9.14.4",
+    "langchain-openai>=1.4.1",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "trafilatura>=2.1.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that require a network connection and a Camoufox browser",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
