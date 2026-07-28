@@ -1,7 +1,7 @@
 [project]
 name = "midas"
 version = "0.1.0"
-description = "Search, scrape, clean, and compress web research."
+description = "Search the web, scrape pages, and compress cleaned page text."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

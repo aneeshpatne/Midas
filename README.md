@@ -1,11 +1,11 @@
 # Midas
 
-Midas exposes one asynchronous utility that searches the web, renders pages with
-Camoufox, extracts clean main-page text locally, and compresses the cleaned corpus
-with `gpt-5.6-terra`.
+Midas searches the web, renders pages with Camoufox, extracts clean main-page text
+locally, then compresses that scraped corpus with an Ollama model
+(`gpt-oss:120b-cloud` by default) via ChatOpenAI's OpenAI-compatible client.
 
-Raw HTML, search-result snippets, scripts, and unfiltered DOM text are not sent to
-the model.
+The model only compresses what was scraped. It is not asked to research beyond those
+pages. Full cleaned page text remains available on each successful source.
 
 ## Setup
 
@@ -15,36 +15,56 @@ uv run python -m camoufox fetch
 cp .env.example .env
 ```
 
-Add your OpenAI API key to `.env`:
+Compression talks to a local Ollama server at `http://localhost:11434/v1`. Make sure
+Ollama is running and the model is available:
+
+```bash
+ollama pull gpt-oss:120b-cloud
+```
+
+Optional overrides in `.env`:
 
 ```dotenv
-OPENAI_API_KEY=your-api-key-here
+OLLAMA_BASE_URL=http://localhost:11434/v1
+# OLLAMA_API_KEY=ollama
 ```
 
 ## Usage
 
+Call the whole pipeline with one helper:
+
 ```python
-import asyncio
+from midas import web_search
 
-from midas import search_scrape_compress
-
-
-async def main() -> None:
-    result = await search_scrape_compress(
-        "Recent developments in sodium-ion batteries",
-        max_results=5,
-    )
-    print(result.digest)
-    for source in result.sources:
-        print(source.source_id, source.status, source.url)
-
-
-asyncio.run(main())
+result = web_search(
+    "Recent developments in sodium-ion batteries",
+    max_results=5,
+)
+print(result.compressed)  # AI compression of scraped pages only
+for source in result.sources:
+    print(source.source_id, source.status, source.url)
+    if source.content:
+        print(source.content[:200])
 ```
 
-The result is a frozen Pydantic model containing the original query, the neutral
-digest, and successful or failed source records. A failed page does not abort the
-pipeline when at least one other page succeeds.
+Or from the command line:
+
+```bash
+uv run python examples/web_search.py "Recent developments in sodium-ion batteries"
+uv run python examples/web_search.py "query" --max-results 3
+```
+
+In async code:
+
+```python
+from midas import search_and_scrape
+
+result = await search_and_scrape("Recent developments in sodium-ion batteries")
+```
+
+The result is a frozen Pydantic model with the query, compressed text, and source
+records. Successful sources include full cleaned `content`; failed pages include an
+`error`. A failed page does not abort the pipeline when at least one other page succeeds.
 
 ## Development
 
