@@ -66,6 +66,34 @@ The result is a frozen Pydantic model with the query, compressed text, and sourc
 records. Successful sources include full cleaned `content`; failed pages include an
 `error`. A failed page does not abort the pipeline when at least one other page succeeds.
 
+## fundamentals provider company scraper
+
+Midas also ships a structured scraper for
+[`https://www.fundamentals provider/company/{symbol}/`](https://www.fundamentals provider/):
+
+```python
+from midas import scrape_company_sync
+
+result = scrape_company_sync("RELIANCE", include_chart=True)
+print(result.summary())
+print(result.page.quarters.numeric_rows["Sales"])
+print(result.page.peers[:3])
+```
+
+CLI:
+
+```bash
+uv run python examples/scrape_fundamentals.py RELIANCE
+uv run python examples/scrape_fundamentals.py TCS --consolidated --both --json tcs.json
+uv run python examples/scrape_fundamentals.py TCS --json              # full JSON on stdout
+uv run python examples/scrape_fundamentals.py --search "tata motors"
+```
+
+It extracts profile/ratios, pros & cons, sector path, quarterly + annual statements,
+balance sheet, cash flow, ratios, growth CAGRs, shareholding, peers, announcements,
+annual reports, credit ratings, and concalls. Optional chart series and schedule
+breakdowns use Screener’s public AJAX endpoints. Be polite with request volume.
+
 ## Development
 
 ```bash
