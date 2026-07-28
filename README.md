@@ -108,6 +108,60 @@ returns, drawdown, DMA regime, and volume stats for agents. With `--concalls` /
 summarizes them with the same Ollama model used by web search (guidance, margins,
 capex, risks, Q&A). Be polite with request volume.
 
+## signals provider high-impact signals
+
+Midas also scrapes **free, high-impact** pages on
+[`signals provider`](https://signals provider/) that complement Screener (not a
+fundamentals replacement):
+
+- analyst consensus headline (target / upside / analyst count)
+- SWOT rule-based strengths, weaknesses, opportunities, threats
+- superstar (ace investor) holdings and recent buys/sells
+- ASM/GSM surveillance risk flag
+- FII/DII cash-segment snapshot
+
+```python
+from midas import scrape_signals_sync
+
+result = scrape_signals_sync("TCS")
+print(result.agent_brief())
+print(result.agent_payload()["swot"])
+```
+
+CLI:
+
+```bash
+uv run python examples/scrape_signals.py TCS
+uv run python examples/scrape_signals.py TCS --agent
+uv run python examples/scrape_signals.py TITAN --json
+uv run python examples/scrape_signals.py --superstars
+uv run python examples/scrape_signals.py --asm
+uv run python examples/scrape_signals.py --fii-dii
+```
+
+Be polite with request volume. Prefer Screener for statements/peers/concalls;
+use signals provider for the signal layer above.
+
+## DeepAgent tools
+
+`midas.deepagents.deepagent.agent` automatically registers four tools:
+
+- `web_research` — grounded web search, scrape, and summary with source URLs.
+- `company_fundamentals` — normal Screener fundamentals, statements, peers, and chart data.
+- `earnings_transcripts` — a separate transcript tool for management guidance, margins,
+  capex, risks, and Q&A.
+- `market_signals` — consensus, SWOT, superstars, ASM/GSM, FII/DII.
+
+Set `DEEPSEEK_API_KEY` before importing the configured agent, then invoke it as usual:
+
+```python
+from midas.deepagents.deepagent import agent
+
+answer = await agent.ainvoke(
+    {"messages": [("user", "Summarize TCS's latest results and concall guidance")]}
+)
+```
+
 ## Development
 
 ```bash
