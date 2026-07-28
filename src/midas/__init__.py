@@ -1,23 +1,23 @@
 """Midas public API."""
 
-from .models import ResearchResult, ScrapeStatus, SourceResult
+from .models import ScrapeStatus, SearchResult, SourceResult
 from .pipeline import (
     CompressionError,
-    ConfigurationError,
     MidasError,
     ScrapeError,
     SearchError,
-    search_scrape_compress,
+    search_and_scrape,
+    web_search,
 )
 
 __all__ = [
     "CompressionError",
-    "ConfigurationError",
     "MidasError",
-    "ResearchResult",
     "ScrapeError",
     "ScrapeStatus",
     "SearchError",
+    "SearchResult",
     "SourceResult",
-    "search_scrape_compress",
+    "search_and_scrape",
+    "web_search",
 ]

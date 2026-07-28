@@ -21,5 +21,5 @@ async def test_camoufox_scrapes_and_cleans_a_public_html_page() -> None:
 
     sources = await pipeline._scrape_hits(hits)
 
-    assert sources[0].result.status is ScrapeStatus.SUCCESS
-    assert sources[0].clean_content
+    assert sources[0].status is ScrapeStatus.SUCCESS
+    assert sources[0].content

@@ -1,4 +1,4 @@
-"""Typed results returned by the Midas pipeline."""
+"""Typed results returned by the Midas web search pipeline."""
 
 from enum import StrEnum
 
@@ -13,7 +13,7 @@ class ScrapeStatus(StrEnum):
 
 
 class SourceResult(BaseModel):
-    """Public metadata and status for one source."""
+    """One search hit after scrape and local cleaning."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -21,14 +21,14 @@ class SourceResult(BaseModel):
     title: str = Field(min_length=1)
     url: str = Field(min_length=1)
     status: ScrapeStatus
-    excerpt: str | None = None
+    content: str | None = None
     error: str | None = None
 
     @model_validator(mode="after")
     def validate_status_fields(self) -> "SourceResult":
         if self.status is ScrapeStatus.SUCCESS:
-            if not self.excerpt:
-                raise ValueError("A successful source must include an excerpt")
+            if not self.content:
+                raise ValueError("A successful source must include scraped content")
             if self.error is not None:
                 raise ValueError("A successful source cannot include an error")
         elif not self.error:
@@ -36,11 +36,15 @@ class SourceResult(BaseModel):
         return self
 
 
-class ResearchResult(BaseModel):
-    """A neutral digest and the sources considered while producing it."""
+class SearchResult(BaseModel):
+    """Search query, AI compression of scraped text, and source records."""
 
     model_config = ConfigDict(frozen=True)
 
     query: str = Field(min_length=1)
-    digest: str = Field(min_length=1)
+    compressed: str = Field(min_length=1)
     sources: tuple[SourceResult, ...] = Field(min_length=1)
+
+    def text(self) -> str:
+        """Return the compressed statement of what was scraped."""
+        return self.compressed
