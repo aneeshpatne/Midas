@@ -7,8 +7,10 @@ requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
     "camoufox>=0.5.4",
+    "deepagents>=0.6.12",
     "ddgs>=9.14.4",
     "httpx>=0.28.1",
+    "langchain-deepseek",
     "langchain-openai>=1.4.1",
     "lxml>=6.1.1",
     "pydantic>=2.13.4",
