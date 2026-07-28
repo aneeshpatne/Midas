@@ -1,0 +1,25 @@
+import os
+
+import pytest
+
+from midas import ScrapeStatus, pipeline
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_camoufox_scrapes_and_cleans_a_public_html_page() -> None:
+    if os.getenv("MIDAS_RUN_INTEGRATION") != "1":
+        pytest.skip("Set MIDAS_RUN_INTEGRATION=1 to run the browser smoke test")
+
+    hits = (
+        pipeline._SearchHit(
+            source_id="S1",
+            title="Example Domain",
+            url="https://example.com/",
+        ),
+    )
+
+    sources = await pipeline._scrape_hits(hits)
+
+    assert sources[0].result.status is ScrapeStatus.SUCCESS
+    assert sources[0].clean_content
