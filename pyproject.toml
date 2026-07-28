@@ -5,9 +5,12 @@ description = "Search the web, scrape pages, and compress cleaned page text."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "beautifulsoup4>=4.15.0",
     "camoufox>=0.5.4",
     "ddgs>=9.14.4",
+    "httpx>=0.28.1",
     "langchain-openai>=1.4.1",
+    "lxml>=6.1.1",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     "trafilatura>=2.1.0",
