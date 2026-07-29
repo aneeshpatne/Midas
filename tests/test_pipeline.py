@@ -58,9 +58,10 @@ async def test_search_adapter_deduplicates_urls_and_ignores_snippets(
         def __init__(self, *, timeout: int) -> None:
             captured["timeout"] = timeout
 
-        def text(self, query: str, *, max_results: int):
+        def text(self, query: str, *, max_results: int, backend: str):
             captured["query"] = query
             captured["max_results"] = max_results
+            captured["backend"] = backend
             return [
                 {
                     "title": "  First   result ",
@@ -81,6 +82,7 @@ async def test_search_adapter_deduplicates_urls_and_ignores_snippets(
 
     assert captured["query"] == "battery query"
     assert captured["max_results"] == 15
+    assert captured["backend"] == "brave"
     assert hits == (
         pipeline._SearchHit(
             source_id="S1",
@@ -88,6 +90,30 @@ async def test_search_adapter_deduplicates_urls_and_ignores_snippets(
             url="https://example.com/article",
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_search_adapter_falls_back_when_preferred_backend_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempted: list[str] = []
+
+    class FakeDDGS:
+        def __init__(self, *, timeout: int) -> None:
+            pass
+
+        def text(self, query: str, *, max_results: int, backend: str):
+            attempted.append(backend)
+            if backend == "brave":
+                raise ConnectionError("preferred backend unavailable")
+            return [{"title": "Fallback result", "href": "https://example.com/fallback"}]
+
+    monkeypatch.setattr(pipeline, "DDGS", FakeDDGS)
+
+    hits = await pipeline._search_web("fallback query", max_results=1)
+
+    assert attempted == ["brave", "auto"]
+    assert hits[0].url == "https://example.com/fallback"
 
 
 def test_search_candidate_diversification_prefers_independent_publishers() -> None:

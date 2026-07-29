@@ -28,6 +28,7 @@ _MODEL = "gpt-oss:120b-cloud"
 _OLLAMA_BASE_URL = "http://localhost:11434/v1"
 _SEARCH_TIMEOUT_SECONDS = 15
 _SEARCH_CANDIDATE_MULTIPLIER = 3
+_SEARCH_BACKENDS = ("brave", "auto")
 _PAGE_RESPONSE_TIMEOUT_MS = 30_000
 _DOM_CONTENT_TIMEOUT_MS = 5_000
 _RENDERED_TEXT_TIMEOUT_MS = 15_000
@@ -158,7 +159,18 @@ async def _search_web(query: str, *, max_results: int) -> tuple[_SearchHit, ...]
         # Collect enough candidates to replace duplicate publishers with independent
         # sources, while preserving the caller's requested number of scrape targets.
         candidate_count = min(max_results * _SEARCH_CANDIDATE_MULTIPLIER, 30)
-        return DDGS(timeout=_SEARCH_TIMEOUT_SECONDS).text(query, max_results=candidate_count)
+        last_error: Exception | None = None
+        for backend in _SEARCH_BACKENDS:
+            try:
+                return DDGS(timeout=_SEARCH_TIMEOUT_SECONDS).text(
+                    query,
+                    max_results=candidate_count,
+                    backend=backend,
+                )
+            except Exception as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
 
     try:
         raw_results = await asyncio.to_thread(run_search)
