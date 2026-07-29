@@ -196,6 +196,12 @@ use signals provider for the signal layer above.
 
 ## DeepAgent tools
 
+Expensive research tool results can be shared across runs through Redis. Set
+`MIDAS_REDIS_URL` (or `REDIS_URL`) to a Redis connection URL such as
+`redis://localhost:6379/0`. Successful scrape and market-data responses are cached
+for 24 hours; errors are never cached, and Redis failures fall back to uncached
+execution.
+
 `midas.deepagents.deepagent.agent` automatically registers twenty-four tools:
 
 - `send_update` — emits a conversational, real-time research update through the

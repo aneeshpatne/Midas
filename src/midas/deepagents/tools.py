@@ -36,6 +36,7 @@ from ..market_data import (
 from ..pipeline import MidasError, search_and_scrape
 from ..fundamentals import FundamentalsError, scrape_company
 from ..signals import signals providerError, scrape_signals
+from .cache import redis_cached_tool
 from .charts import (  # noqa: F401
     CHART_TOOLS,
     ChartDatum,
@@ -485,6 +486,7 @@ twitter_search = build_twitter_search_tool()
 
 @tool("web_research")
 @_source_limited(_SOURCE_WEB, "web_research")
+@redis_cached_tool("web_research")
 async def web_research(query: str, max_results: int = 5) -> str:
     """Search the public web and summarize only the pages Midas successfully scraped.
 
@@ -522,6 +524,7 @@ async def web_research(query: str, max_results: int = 5) -> str:
 
 @tool("company_fundamentals")
 @_source_limited(_SOURCE_FUNDAMENTALS, "company_fundamentals")
+@redis_cached_tool("company_fundamentals")
 async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
     """Fetch normal fundamentals provider company fundamentals and market data for an NSE symbol.
 
@@ -560,6 +563,7 @@ async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
 
 @tool("earnings_transcripts")
 @_source_limited(_SOURCE_FUNDAMENTALS, "earnings_transcripts")
+@redis_cached_tool("earnings_transcripts")
 async def earnings_transcripts(
     symbol: str,
     consolidated: bool = False,
@@ -613,6 +617,7 @@ async def earnings_transcripts(
 
 @tool("market_signals")
 @_source_limited(_SOURCE_SIGNALS, "market_signals")
+@redis_cached_tool("market_signals")
 async def market_signals(symbol: str) -> str:
     """Fetch high-impact free signals provider signals that Screener does not cover well.
 
@@ -648,6 +653,7 @@ async def market_signals(symbol: str) -> str:
 
 @tool("nse_list_index")
 @_source_limited(_SOURCE_NSE, "nse_list_index")
+@redis_cached_tool("nse_list_index")
 def nse_list_index(
     index: Annotated[
         NseIndex,
@@ -713,6 +719,7 @@ def nse_list_index(
 
 @tool("nse_company_filings")
 @_source_limited(_SOURCE_NSE, "nse_company_filings")
+@redis_cached_tool("nse_company_filings")
 def nse_company_filings(
     symbol: str,
     lookback_days: int = 90,
@@ -752,6 +759,7 @@ def nse_company_filings(
 
 @tool("nse_equity_snapshot")
 @_source_limited(_SOURCE_NSE, "nse_equity_snapshot")
+@redis_cached_tool("nse_equity_snapshot")
 def nse_equity_snapshot(symbol: str) -> str:
     """Fetch a live NSE equity quote and security identity snapshot.
 
@@ -775,6 +783,7 @@ def nse_equity_snapshot(symbol: str) -> str:
 
 @tool("equity_trading_history")
 @_source_limited(_SOURCE_NSE, "equity_trading_history")
+@redis_cached_tool("equity_trading_history")
 def equity_trading_history(symbol: str, lookback_days: int = 90) -> str:
     """Summarize NSE price, volume, volatility, drawdown, and delivery history.
 
@@ -800,6 +809,7 @@ def equity_trading_history(symbol: str, lookback_days: int = 90) -> str:
 
 @tool("nse_market_scan")
 @_source_limited(_SOURCE_NSE, "nse_market_scan")
+@redis_cached_tool("nse_market_scan")
 def nse_market_scan(
     index: NseIndex = NseIndex.NIFTY_500,
     limit: int = 10,
@@ -822,6 +832,7 @@ def nse_market_scan(
 
 @tool("equity_event_calendar")
 @_source_limited(_SOURCE_NSE, "equity_event_calendar")
+@redis_cached_tool("equity_event_calendar")
 def equity_event_calendar(
     symbol: str | None = None,
     lookback_days: int = 7,
@@ -863,6 +874,7 @@ def equity_event_calendar(
 
 @tool("exchange_deals")
 @_source_limited(_SOURCE_NSE, "exchange_deals")
+@redis_cached_tool("exchange_deals")
 def exchange_deals(
     symbol: str | None = None,
     lookback_days: int = 30,
@@ -903,6 +915,7 @@ def exchange_deals(
 
 @tool("nse_derivatives_snapshot")
 @_source_limited(_SOURCE_NSE, "nse_derivatives_snapshot")
+@redis_cached_tool("nse_derivatives_snapshot")
 def nse_derivatives_snapshot(
     symbol: str,
     expiry: str | None = None,
@@ -945,6 +958,7 @@ def nse_derivatives_snapshot(
 
 @tool("institutional_activity")
 @_source_limited(_SOURCE_NSE, "institutional_activity")
+@redis_cached_tool("institutional_activity")
 def institutional_activity(trade_date: str | None = None) -> str:
     """Fetch latest or historical Indian institutional cash and derivatives reports.
 
@@ -973,6 +987,7 @@ def institutional_activity(trade_date: str | None = None) -> str:
 
 @tool("india_market_context")
 @_source_limited(_SOURCE_NSE, "india_market_context")
+@redis_cached_tool("india_market_context")
 def india_market_context(
     index: MarketContextIndex = MarketContextIndex.NIFTY_50,
     commodities: list[McxCommodity] | None = None,
