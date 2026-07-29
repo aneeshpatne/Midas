@@ -31,6 +31,17 @@ OLLAMA_BASE_URL=http://localhost:11434/v1
 
 ## Usage
 
+Run the DeepAgent from the command line:
+
+```bash
+uv run midas "Summarize TCS's latest results and concall guidance"
+```
+
+The CLI displays a compact status line for each research tool and `send_update`
+research narration as they arrive, then prints the final answer. It needs the same
+model credentials as the configured DeepAgent (`DEEPSEEK_API_KEY` by default); the
+CLI automatically loads a project `.env` file.
+
 Call the whole pipeline with one helper:
 
 ```python
@@ -144,13 +155,17 @@ use signals provider for the signal layer above.
 
 ## DeepAgent tools
 
-`midas.deepagents.deepagent.agent` automatically registers four tools:
+`midas.deepagents.deepagent.agent` automatically registers six tools:
 
+- `send_update` — emits a conversational, real-time research update through the
+  agent's custom stream.
 - `web_research` — grounded web search, scrape, and summary with source URLs.
 - `company_fundamentals` — normal Screener fundamentals, statements, peers, and chart data.
 - `earnings_transcripts` — a separate transcript tool for management guidance, margins,
   capex, risks, and Q&A.
 - `market_signals` — consensus, SWOT, superstars, ASM/GSM, FII/DII.
+- `twitter_search` — latest public X/Twitter discussion through the local Grok CLI,
+  capped at two calls per agent instance.
 
 Set `DEEPSEEK_API_KEY` before importing the configured agent, then invoke it as usual:
 
@@ -161,6 +176,21 @@ answer = await agent.ainvoke(
     {"messages": [("user", "Summarize TCS's latest results and concall guidance")]}
 )
 ```
+
+To render progress updates as they happen, stream the agent with the `custom` mode
+and handle chunks whose `type` is `deep_agent_update`:
+
+```python
+async for mode, chunk in agent.astream(
+    {"messages": [("user", "Research TCS")],},
+    stream_mode=["updates", "custom"],
+):
+    if mode == "custom" and chunk["type"] == "deep_agent_update":
+        print(chunk["update"])
+```
+
+`twitter_search` requires the `grok` CLI on `PATH`; unavailable CLI, timeout, and
+non-zero exit failures are returned to the agent as structured errors.
 
 ## Development
 
