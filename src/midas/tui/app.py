@@ -7,7 +7,6 @@ import json
 import os
 import time
 import uuid
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +101,7 @@ class ChatTranscript(VerticalScroll):
             title = event.title or "Research update"
             await self.mount(
                 Collapsible(
-                    Static(_safe_detail(event.content)),
+                    Static(_safe_detail(event.content), markup=False),
                     title=f"{label} · {title}",
                     collapsed=False,
                     classes="activity update",
@@ -113,7 +112,7 @@ class ChatTranscript(VerticalScroll):
             key = (event.agent, event_id)
             existing = self._reasoning.get(key)
             if existing is None:
-                detail = Static(_safe_detail(event.content))
+                detail = Static(_safe_detail(event.content), markup=False)
                 self._reasoning[key] = (detail, str(event.content))
                 await self.mount(
                     Collapsible(
@@ -131,7 +130,7 @@ class ChatTranscript(VerticalScroll):
         elif event.kind == EventKind.TOOL_STARTED:
             title = event.title or "tool"
             widget = Collapsible(
-                Static(_safe_detail(event.content), classes="tool-detail"),
+                Static(_safe_detail(event.content), markup=False, classes="tool-detail"),
                 title=f"◌ {label} · {title}",
                 collapsed=True,
                 classes="activity tool running",
@@ -145,7 +144,11 @@ class ChatTranscript(VerticalScroll):
             state = "failed" if event.kind == EventKind.TOOL_ERROR else "finished"
             if tool is None:
                 tool = Collapsible(
-                    Static(_safe_detail(event.content), classes="tool-detail"),
+                    Static(
+                        _safe_detail(event.content),
+                        markup=False,
+                        classes="tool-detail",
+                    ),
                     title=f"{marker} {label} · {event.title or 'tool'}",
                     collapsed=True,
                     classes=f"activity tool {state}",
@@ -301,6 +304,7 @@ class MidasApp(App[None]):
         self.research_agent = agent
         self.workspace = (workspace or Path.cwd()).resolve()
         self.thread_id = uuid.uuid4().hex
+        self._conversation: list[tuple[str, str]] = []
         self._worker: Worker[Any] | None = None
         self._research_running = False
         self._active_agent = ""
@@ -345,14 +349,9 @@ class MidasApp(App[None]):
         splash.update(f"{_SPLASH_FRAMES[0]}\n\nMIDAS\nWaking the research desk…")
         try:
             if self.research_agent is None:
-                from langgraph.checkpoint.memory import InMemorySaver
-
                 from ..deepagents.deepagent import create_midas_agent
 
-                saver = InMemorySaver()
-                self.research_agent = await asyncio.to_thread(
-                    partial(create_midas_agent, checkpointer=saver)
-                )
+                self.research_agent = await asyncio.to_thread(create_midas_agent)
             missing = [
                 name for name in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY") if not os.getenv(name)
             ]
@@ -418,30 +417,49 @@ class MidasApp(App[None]):
     @work(exclusive=True, group="research")
     async def run_research(self, prompt: str) -> None:
         transcript = self.query_one(ChatTranscript)
+        root_answers: dict[str, str] = {}
         try:
-            config = {"configurable": {"thread_id": self.thread_id}}
             async for event in stream_agent_events(
                 self.research_agent,
                 prompt,
-                config=config,
+                history=self._conversation,
             ):
                 if event.agent:
                     self._active_agent = event.agent
                     self._set_active_agent(event.agent)
                 if event.kind == EventKind.TEXT:
                     await transcript.append_text(event)
+                    if event.agent == "midas-lead-analyst":
+                        message_id = event.event_id or "root-answer"
+                        root_answers[message_id] = (
+                            root_answers.get(message_id, "") + str(event.content)
+                        )
                 elif event.kind == EventKind.TODOS:
                     self._render_todos(event.content)
                 elif event.kind == EventKind.STATUS:
                     continue
                 else:
                     await transcript.add_activity(event)
+            if root_answers:
+                final_answer = next(reversed(root_answers.values()))
+                self._conversation.extend(
+                    [("user", prompt), ("assistant", final_answer)]
+                )
             await transcript.add_system("Turn completed.")
             self.query_one("#brand", Static).update("MIDAS  ◆  ready")
         except asyncio.CancelledError:
             await transcript.add_system("Research cancelled.")
             self.query_one("#brand", Static).update("MIDAS  ◇  cancelled")
         except Exception as exc:
+            if "insufficient tool messages following tool_calls" in str(exc):
+                self._conversation.clear()
+                self.thread_id = uuid.uuid4().hex
+                await transcript.add_system(
+                    "The provider rejected an incomplete tool-call batch. Internal "
+                    "conversation state was cleared automatically; generated files "
+                    "were left untouched. You can resubmit the request safely.",
+                    error=True,
+                )
             await transcript.add_system(f"Research failed: {exc}", error=True)
             self.query_one("#brand", Static).update("MIDAS  ✕  failed")
         finally:
@@ -535,6 +553,7 @@ class MidasApp(App[None]):
 
     async def _new_session(self) -> None:
         self.thread_id = uuid.uuid4().hex
+        self._conversation.clear()
         self._session_files.clear()
         self._known_files = self._scan_markdown()
         await self.query_one(ChatTranscript).reset_feed()

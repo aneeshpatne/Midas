@@ -4,17 +4,27 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessageChunk
 from textual.widgets import Input, Markdown, Static, Tree
 
 from midas.tui.app import MidasApp
+from midas.tui.events import AgentEvent, EventKind
 
 
 class _FakeAgent:
     def __init__(self) -> None:
-        self.configs: list[dict[str, Any]] = []
+        self.calls: list[tuple[Any, dict[str, Any]]] = []
 
     async def astream(self, payload: Any, **kwargs: Any):
-        self.configs.append(kwargs["config"])
+        self.calls.append((payload, kwargs))
+        yield {
+            "type": "messages",
+            "ns": (),
+            "data": (
+                AIMessageChunk(content="Completed answer.", id=f"answer-{len(self.calls)}"),
+                {"lc_agent_name": "midas-lead-analyst"},
+            ),
+        }
         yield {
             "type": "custom",
             "ns": (),
@@ -29,6 +39,15 @@ class _FakeAgent:
                 }
             },
         }
+
+
+class _InvalidToolHistoryAgent:
+    async def astream(self, payload: Any, **kwargs: Any):
+        if False:
+            yield None
+        raise RuntimeError(
+            "insufficient tool messages following tool_calls message"
+        )
 
 
 @pytest.mark.asyncio
@@ -46,10 +65,13 @@ async def test_tui_submits_turn_and_reuses_context_thread(tmp_path: Path) -> Non
         await pilot.press("enter")
         await pilot.pause(0.2)
 
-        assert len(fake.configs) == 2
-        assert fake.configs[0]["configurable"]["thread_id"] == fake.configs[1][
-            "configurable"
-        ]["thread_id"]
+        assert len(fake.calls) == 2
+        assert fake.calls[0][0]["messages"] == [("user", "NIFTY IT")]
+        assert fake.calls[1][0]["messages"] == [
+            ("user", "NIFTY IT"),
+            ("assistant", "Completed answer."),
+            ("user", "What were the main risks?"),
+        ]
         assert "Research universe" in str(app.query_one("#todos", Static).render())
         assert prompt.disabled is False
 
@@ -88,3 +110,50 @@ async def test_new_session_changes_thread_and_clears_files(tmp_path: Path) -> No
         assert app.thread_id != old_thread
         assert app._session_files == {}
         assert app.query_one("#file-tree", Tree).root.label.plain == "output/research"
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_history_is_cleared_for_safe_resubmission(tmp_path: Path) -> None:
+    app = MidasApp(agent=_InvalidToolHistoryAgent(), workspace=tmp_path)
+    app._conversation = [("user", "old"), ("assistant", "context")]
+
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "Continue"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        assert app._conversation == []
+        assert prompt.disabled is False
+
+
+@pytest.mark.asyncio
+async def test_raw_json_tool_results_are_not_parsed_as_rich_markup(tmp_path: Path) -> None:
+    app = MidasApp(agent=_FakeAgent(), workspace=tmp_path)
+    result = {
+        "announcements": [
+            {
+                "title": "Chairman's theme \\ ITC: Partnering India\\",
+                "url": "https://example.com/43f4-4f1c-99b2-9ddfff91dfdd.pdf",
+            }
+        ]
+    }
+
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        transcript = app.query_one("#transcript")
+        await transcript.add_activity(
+            AgentEvent(
+                EventKind.TOOL_FINISHED,
+                "research-agent",
+                result,
+                "call-json",
+                "nse_company_filings",
+            )
+        )
+        await pilot.pause()
+
+        detail = transcript.query_one(".tool-detail", Static)
+        assert detail._render_markup is False
+        assert "43f4-4f1c" in str(detail.render())

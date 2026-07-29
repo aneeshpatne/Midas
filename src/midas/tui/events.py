@@ -87,12 +87,13 @@ async def stream_agent_events(
     research_agent: Any,
     prompt: str,
     *,
+    history: Sequence[tuple[str, str]] = (),
     config: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run one turn and yield normalized messages, tools, todos, and custom updates."""
     seen_tools: set[str] = set()
     async for part in research_agent.astream(
-        {"messages": [("user", prompt)]},
+        {"messages": [*history, ("user", prompt)]},
         config=config,
         stream_mode=["messages", "updates", "custom"],
         subgraphs=True,
