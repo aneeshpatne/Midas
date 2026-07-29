@@ -16,12 +16,18 @@ dependencies = [
     "nse[server]>=3.2.1",
     "pydantic>=2.13.4",
     "pypdf>=6.14.2",
+    "pillow>=11.3.0",
     "python-dotenv>=1.2.2",
     "trafilatura>=2.1.0",
+    "nselib==2.5.1",
+    "indian-market-data==1.1.1",
+    "cloudscraper>=1.2.71",
+    "textual>=6.0.0",
 ]
 
 [project.scripts]
 midas = "midas.cli:main"
+midas-tui = "midas.tui:main"
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]
