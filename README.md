@@ -35,12 +35,53 @@ Run the DeepAgent from the command line:
 
 ```bash
 uv run midas "Summarize TCS's latest results and concall guidance"
+uv run midas "NIFTY IT"
 ```
 
 The CLI displays a compact status line for each research tool and `send_update`
 research narration as they arrive, then prints the final answer. It needs the same
 model credentials as the configured DeepAgent (`DEEPSEEK_API_KEY` by default); the
 CLI automatically loads a project `.env` file.
+
+For an interactive, Codex-style terminal session, launch the TUI:
+
+```bash
+uv run midas-tui
+```
+
+The TUI keeps conversational context in memory for follow-up questions and streams
+agent text, provider-visible reasoning/status blocks, research updates, tool activity,
+and todos as they happen. The agent panel highlights the lead, research, adversarial,
+or report agent currently producing work. Markdown artifacts created during the
+session appear under `output/research` in the file tree and can be selected for a
+rendered preview.
+
+Controls:
+
+- `Enter` — submit the prompt.
+- `Ctrl+C` — cancel active research, or quit while idle.
+- `Ctrl+N` or `/new` — clear the conversation and start a fresh context.
+- `F2` / `F3` — toggle the agents/todos and files/preview panes.
+- `/quit` — exit.
+
+The input is intentionally locked while a turn is running. TUI context is ephemeral
+and is discarded on exit; generated research artifacts remain on disk. Both
+`DEEPSEEK_API_KEY` and `OPENAI_API_KEY` should be configured for the complete staged
+workflow. If either is missing, the interface still opens and displays a setup error.
+
+For a sector or NSE index, Midas runs a staged 12–24 month idea-generation workflow:
+
+1. A primary research agent screens the complete universe and writes its research,
+   3–5 deeper-research candidates, and explicit elimination logic as Markdown.
+2. An adversarial agent builds a blind competing screen, then runs a second pass
+   challenging the primary selection.
+3. The lead agent verifies disagreements and writes an auditable reconciliation and
+   final shortlist.
+4. A publication-only agent calls its single `generate_report` tool to compile the
+   completed Markdown set into `final_report.pdf` with Tectonic.
+
+Each run is saved under `output/research/<topic>/<timestamp>/`. The output is research
+prioritization, not personalized investment advice or a buy/sell recommendation.
 
 Call the whole pipeline with one helper:
 
@@ -155,7 +196,7 @@ use signals provider for the signal layer above.
 
 ## DeepAgent tools
 
-`midas.deepagents.deepagent.agent` automatically registers six tools:
+`midas.deepagents.deepagent.agent` automatically registers twenty-four tools:
 
 - `send_update` — emits a conversational, real-time research update through the
   agent's custom stream.
@@ -164,8 +205,34 @@ use signals provider for the signal layer above.
 - `earnings_transcripts` — a separate transcript tool for management guidance, margins,
   capex, risks, and Q&A.
 - `market_signals` — consensus, SWOT, superstars, ASM/GSM, FII/DII.
+- `nse_list_index` — live constituents for Nifty and special NSE equity lists.
+- `nse_company_filings` — NSE announcements, actions, board meetings, results,
+  shareholding, and annual-report links.
+- `nse_equity_snapshot` — live NSE quote, volume, delivery, price-band, 52-week,
+  security-status, and identity context.
+- `equity_trading_history` — bounded price, volatility, drawdown, volume, and
+  delivery-trend analysis.
+- `nse_market_scan` — index breadth, gainers, losers, volume gainers, active
+  equities, and India VIX.
+- `equity_event_calendar` — market-wide or symbol-filtered results and corporate
+  event discovery.
+- `exchange_deals` — bulk deals, block deals, and reported short-selling activity.
+- `nse_derivatives_snapshot` — bounded option-chain positioning, PCR, max pain,
+  major OI strikes, lot size, and F&O-ban status.
+- `institutional_activity` — latest or dated FII/DII, NSDL FPI, and derivatives reports.
+- `india_market_context` — compact Nifty price/TRI and MCX commodity performance.
 - `twitter_search` — latest public X/Twitter discussion through the local Grok CLI,
   capped at two calls per agent instance.
+- `generate_bar_chart` / `generate_horizontal_bar_chart` — static PNG bar charts.
+- `generate_line_chart` / `generate_area_chart` — single- or multi-series trend charts.
+- `generate_pie_chart` — non-negative labelled-share charts.
+- `generate_stacked_bar_chart` — multi-series composition by category.
+- `generate_scatter_chart` — labelled x/y observation plots.
+- `generate_heatmap_chart` — numeric row/column matrix visualizations.
+
+Chart artifacts are written to `output/charts/` and the tools return JSON containing
+the absolute path, relative path, Markdown embed, and a note that the values are
+rendered as supplied rather than independently verified.
 
 Set `DEEPSEEK_API_KEY` before importing the configured agent, then invoke it as usual:
 
