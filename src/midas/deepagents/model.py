@@ -12,8 +12,8 @@ def get_main_model() -> ChatDeepSeek:
     Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
     """
     return ChatDeepSeek(
-        model="deepseek-v4-pro",
-        reasoning_effort="high",
+        model="deepseek-v4-flash",
+        reasoning_effort="max",
     )
 
 
@@ -21,6 +21,19 @@ def get_research_model() -> ChatDeepSeek:
     """Research subagent model (DeepSeek).
 
     Used by research-agent and adversarial-agent for evidence gathering.
+    Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
+    """
+    return ChatDeepSeek(
+        model="deepseek-v4-flash",
+        reasoning_effort="max",
+    )
+
+
+def get_deep_research_model() -> ChatDeepSeek:
+    """Dedicated model for the final-stage deep-research subagent.
+
+    This separate factory lets the deep-dive model and reasoning configuration be
+    tuned without changing the broad research and adversarial agents.
     Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
     """
     return ChatDeepSeek(
