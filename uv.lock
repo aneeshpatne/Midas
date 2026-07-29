@@ -1228,10 +1228,11 @@ dependencies = [
     { name = "camoufox" },
     { name = "ddgs" },
     { name = "deepagents" },
-    { name = "httpx" },
+    { name = "httpx", extra = ["http2"] },
     { name = "langchain-deepseek" },
     { name = "langchain-openai" },
     { name = "lxml" },
+    { name = "nse", extra = ["server"] },
     { name = "pydantic" },
     { name = "pypdf" },
     { name = "python-dotenv" },
@@ -1251,10 +1252,11 @@ requires-dist = [
     { name = "camoufox", specifier = ">=0.5.4" },
     { name = "ddgs", specifier = ">=9.14.4" },
     { name = "deepagents", specifier = ">=0.6.12" },
-    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "httpx", extras = ["http2"], specifier = ">=0.28.1" },
     { name = "langchain-deepseek" },
     { name = "langchain-openai", specifier = ">=1.4.1" },
     { name = "lxml", specifier = ">=6.1.1" },
+    { name = "nse", extras = ["server"], specifier = ">=3.2.1" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pypdf", specifier = ">=6.14.2" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
@@ -1266,6 +1268,32 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = ">=0.16.0" },
+]
+
+[[package]]
+name = "mthrottle"
+version = "0.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/2e/bf9010dc1b2f97ee83fa6f2dd82039dc7893463594218f20c83b3dc8892d/mthrottle-0.0.2.tar.gz", hash = "sha256:c7e771e9fe02c9716e3d825c8a3f97859af693383c070175dd7a69e1a474115a", size = 16238, upload-time = "2023-12-06T18:18:13.647Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/68/0a695fc6fa882a4533401b79454fe5291dd27e7a6b6806cb25b883302171/mthrottle-0.0.2-py3-none-any.whl", hash = "sha256:fc170ff29ec2e76ef57446328720e3c586dd82d9a83ccd79640c7b0f017b3a32", size = 15377, upload-time = "2023-12-06T18:18:11.775Z" },
+]
+
+[[package]]
+name = "nse"
+version = "3.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mthrottle" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/30/2e/b5ff6855c5de7ce73c83614dcf0a2d7a0ac74a5151ea1e21ce1d5cf9ee49/nse-3.2.1.tar.gz", hash = "sha256:771a63f128faf81bb892aa7fbee48c5a9196af37070310fadc33fc1cd5043224", size = 32841, upload-time = "2026-07-23T13:29:56.834Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/3b/c258006d3db0928decaef5f953d1fc8e8ee183cf3bd32beaaef72452e7a3/nse-3.2.1-py3-none-any.whl", hash = "sha256:192e6ee28552d26524e219535a7091e55ed724f3ba6ea1908e64eeb97c303e81", size = 31897, upload-time = "2026-07-23T13:29:55.606Z" },
+]
+
+[package.optional-dependencies]
+server = [
+    { name = "httpx", extra = ["http2"] },
 ]
 
 [[package]]
