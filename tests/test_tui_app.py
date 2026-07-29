@@ -157,3 +157,26 @@ async def test_raw_json_tool_results_are_not_parsed_as_rich_markup(tmp_path: Pat
         detail = transcript.query_one(".tool-detail", Static)
         assert detail._render_markup is False
         assert "43f4-4f1c" in str(detail.render())
+
+
+@pytest.mark.asyncio
+async def test_tui_displays_and_resets_live_token_metrics(tmp_path: Path) -> None:
+    app = MidasApp(agent=_FakeAgent(), workspace=tmp_path)
+
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        app._research_running = True
+        app._started_at = app._started_at or 1.0
+        app._record_usage({"input_tokens": 1_200, "output_tokens": 300})
+        app._update_brand("⠋  working")
+
+        brand = str(app.query_one("#brand", Static).render())
+        assert "IN 1,200" in brand
+        assert "OUT 300" in brand
+        assert "TPS" in brand
+
+        app._research_running = False
+        await app._new_session()
+        brand = str(app.query_one("#brand", Static).render())
+        assert "IN 0" in brand
+        assert "OUT 0" in brand

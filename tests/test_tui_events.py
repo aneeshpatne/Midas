@@ -170,3 +170,51 @@ async def test_stream_agent_events_reads_provider_content_blocks() -> None:
         (EventKind.TEXT, "Live answer"),
         (EventKind.REASONING, "Checking evidence"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_events_emits_incremental_token_usage() -> None:
+    agent = _StreamingAgent(
+        [
+            {
+                "type": "messages",
+                "ns": (),
+                "data": (
+                    AIMessageChunk(
+                        content="Answer",
+                        id="message-usage",
+                        usage_metadata={
+                            "input_tokens": 120,
+                            "output_tokens": 8,
+                            "total_tokens": 128,
+                        },
+                    ),
+                    {"lc_agent_name": "midas-lead-analyst"},
+                ),
+            },
+            {
+                "type": "messages",
+                "ns": (),
+                "data": (
+                    AIMessageChunk(
+                        content=" continues",
+                        id="message-usage",
+                        usage_metadata={
+                            "input_tokens": 120,
+                            "output_tokens": 13,
+                            "total_tokens": 133,
+                        },
+                    ),
+                    {"lc_agent_name": "midas-lead-analyst"},
+                ),
+            },
+        ]
+    )
+
+    events = [event async for event in stream_agent_events(agent, "Question")]
+    usage = [event.content for event in events if event.kind == EventKind.USAGE]
+
+    assert usage == [
+        {"input_tokens": 120, "output_tokens": 8},
+        {"input_tokens": 0, "output_tokens": 5},
+    ]

@@ -309,6 +309,9 @@ class MidasApp(App[None]):
         self._research_running = False
         self._active_agent = ""
         self._started_at = 0.0
+        self._turn_output_tokens = 0
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
         self._animation_index = 0
         self._reduced_motion = bool(os.getenv("NO_COLOR"))
         self._known_files: dict[Path, int] = self._scan_markdown()
@@ -367,7 +370,7 @@ class MidasApp(App[None]):
                 )
             self.query_one("#prompt", Input).disabled = False
             self.query_one("#prompt", Input).focus()
-            self.query_one("#brand", Static).update("MIDAS  ◆  ready")
+            self._update_brand("◆  ready")
         except Exception as exc:
             await self.query_one(ChatTranscript).add_system(
                 f"Agent initialization failed: {exc}", error=True
@@ -380,7 +383,7 @@ class MidasApp(App[None]):
         if self._reduced_motion:
             if self._research_running:
                 agent = display_agent(self._active_agent or "midas-lead-analyst")
-                self.query_one("#brand", Static).update(f"MIDAS  …  {agent} working")
+                self._update_brand(f"…  {agent} working")
             return
         self._animation_index += 1
         splash = self.query_one("#splash", Static)
@@ -391,9 +394,28 @@ class MidasApp(App[None]):
             spinner = _SPINNER[self._animation_index % len(_SPINNER)]
             elapsed = time.monotonic() - self._started_at
             agent = display_agent(self._active_agent or "midas-lead-analyst")
-            self.query_one("#brand", Static).update(
-                f"MIDAS  {spinner}  {agent} working  ·  {elapsed:,.0f}s"
-            )
+            self._update_brand(f"{spinner}  {agent} working  ·  {elapsed:,.0f}s")
+
+    def _update_brand(self, state: str) -> None:
+        elapsed = time.monotonic() - self._started_at if self._research_running else 0.0
+        tps = self._turn_output_tokens / elapsed if elapsed > 0 else 0.0
+        self.query_one("#brand", Static).update(
+            f"MIDAS  {state}  ·  {tps:,.1f} TPS  ·  "
+            f"IN {self._total_input_tokens:,}  OUT {self._total_output_tokens:,}"
+        )
+
+    def _record_usage(self, usage: Any) -> None:
+        if not isinstance(usage, dict):
+            return
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        if not isinstance(input_tokens, int) or isinstance(input_tokens, bool):
+            input_tokens = 0
+        if not isinstance(output_tokens, int) or isinstance(output_tokens, bool):
+            output_tokens = 0
+        self._total_input_tokens += max(0, input_tokens)
+        self._total_output_tokens += max(0, output_tokens)
+        self._turn_output_tokens += max(0, output_tokens)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         value = event.value.strip()
@@ -409,6 +431,7 @@ class MidasApp(App[None]):
         await self.query_one(ChatTranscript).add_user(value)
         self._research_running = True
         self._started_at = time.monotonic()
+        self._turn_output_tokens = 0
         self._active_agent = "midas-lead-analyst"
         event.input.disabled = True
         self._set_active_agent(self._active_agent)
@@ -436,6 +459,8 @@ class MidasApp(App[None]):
                         )
                 elif event.kind == EventKind.TODOS:
                     self._render_todos(event.content)
+                elif event.kind == EventKind.USAGE:
+                    self._record_usage(event.content)
                 elif event.kind == EventKind.STATUS:
                     continue
                 else:
@@ -446,10 +471,10 @@ class MidasApp(App[None]):
                     [("user", prompt), ("assistant", final_answer)]
                 )
             await transcript.add_system("Turn completed.")
-            self.query_one("#brand", Static).update("MIDAS  ◆  ready")
+            self._update_brand("◆  ready")
         except asyncio.CancelledError:
             await transcript.add_system("Research cancelled.")
-            self.query_one("#brand", Static).update("MIDAS  ◇  cancelled")
+            self._update_brand("◇  cancelled")
         except Exception as exc:
             if "insufficient tool messages following tool_calls" in str(exc):
                 self._conversation.clear()
@@ -461,7 +486,7 @@ class MidasApp(App[None]):
                     error=True,
                 )
             await transcript.add_system(f"Research failed: {exc}", error=True)
-            self.query_one("#brand", Static).update("MIDAS  ✕  failed")
+            self._update_brand("✕  failed")
         finally:
             self._research_running = False
             self._set_active_agent("")
@@ -554,12 +579,16 @@ class MidasApp(App[None]):
     async def _new_session(self) -> None:
         self.thread_id = uuid.uuid4().hex
         self._conversation.clear()
+        self._turn_output_tokens = 0
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
         self._session_files.clear()
         self._known_files = self._scan_markdown()
         await self.query_one(ChatTranscript).reset_feed()
         await self.query_one(ChatTranscript).add_system("New contextual session started.")
         self._render_todos([])
         self._rebuild_tree()
+        self._update_brand("◆  ready")
 
     def action_new_session(self) -> None:
         if not self._research_running:

@@ -18,6 +18,7 @@ class EventKind(StrEnum):
     TOOL_FINISHED = "tool_finished"
     TOOL_ERROR = "tool_error"
     TODOS = "todos"
+    USAGE = "usage"
     STATUS = "status"
 
 
@@ -36,6 +37,7 @@ AGENT_LABELS = {
     "midas-lead-analyst": "Lead analyst",
     "research-agent": "Research agent",
     "adversarial-agent": "Adversarial agent",
+    "deep-research-agent": "Deep research agent",
     "report-agent": "Report agent",
 }
 
@@ -83,6 +85,29 @@ def _text_blocks(content: Any) -> tuple[str, str]:
     return "".join(text), "".join(reasoning)
 
 
+def _token_usage(message: Any) -> tuple[int, int]:
+    """Read token counts from LangChain's normalized or provider metadata."""
+    usage = getattr(message, "usage_metadata", None)
+    if not isinstance(usage, Mapping):
+        response = getattr(message, "response_metadata", None)
+        if isinstance(response, Mapping):
+            usage = response.get("token_usage") or response.get("usage")
+    if not isinstance(usage, Mapping):
+        return 0, 0
+
+    def count(*names: str) -> int:
+        for name in names:
+            value = usage.get(name)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return max(0, value)
+        return 0
+
+    return (
+        count("input_tokens", "prompt_tokens"),
+        count("output_tokens", "completion_tokens"),
+    )
+
+
 async def stream_agent_events(
     research_agent: Any,
     prompt: str,
@@ -92,6 +117,7 @@ async def stream_agent_events(
 ) -> AsyncIterator[AgentEvent]:
     """Run one turn and yield normalized messages, tools, todos, and custom updates."""
     seen_tools: set[str] = set()
+    seen_usage: dict[tuple[str, str], tuple[int, int]] = {}
     async for part in research_agent.astream(
         {"messages": [*history, ("user", prompt)]},
         config=config,
@@ -115,6 +141,22 @@ async def stream_agent_events(
                 yield AgentEvent(EventKind.TEXT, agent, text, message_id)
             if reasoning:
                 yield AgentEvent(EventKind.REASONING, agent, reasoning, message_id)
+            input_tokens, output_tokens = _token_usage(message)
+            usage_key = (agent, message_id)
+            previous_input, previous_output = seen_usage.get(usage_key, (0, 0))
+            input_delta = max(0, input_tokens - previous_input)
+            output_delta = max(0, output_tokens - previous_output)
+            if input_delta or output_delta:
+                seen_usage[usage_key] = (
+                    max(previous_input, input_tokens),
+                    max(previous_output, output_tokens),
+                )
+                yield AgentEvent(
+                    EventKind.USAGE,
+                    agent,
+                    {"input_tokens": input_delta, "output_tokens": output_delta},
+                    message_id,
+                )
             continue
 
         agent = _agent_for(part)
