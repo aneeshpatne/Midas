@@ -10,9 +10,11 @@ import socket
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urldefrag, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
+import httpx
 from browserforge.fingerprints import Screen
+from camoufox import launch_options as build_camoufox_launch_options
 from camoufox.async_api import AsyncCamoufox
 from ddgs import DDGS
 from dotenv import load_dotenv
@@ -38,6 +40,19 @@ _MAX_SOURCE_CHARACTERS = 12_000
 _MIN_SOURCE_CHARACTERS = 120
 _MAX_ERROR_CHARACTERS = 300
 _BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
+_CAMOUFOX_FD_LAUNCH_ATTEMPTS = 2
+_HTTP_FALLBACK_TIMEOUT_SECONDS = 20
+_HTTP_FALLBACK_MAX_REDIRECTS = 5
+_HTTP_FALLBACK_MAX_BYTES = 4 * 1024 * 1024
+_HTTP_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_HTTP_FALLBACK_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.8",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36"
+    ),
+}
 
 
 class MidasError(RuntimeError):
@@ -203,26 +218,170 @@ async def _search_web(query: str, *, max_results: int) -> tuple[_SearchHit, ...]
 async def _scrape_hits(hits: tuple[_SearchHit, ...]) -> tuple[SourceResult, ...]:
     safety_checker = _UrlSafetyChecker()
     semaphore = asyncio.Semaphore(_MAX_CONCURRENT_PAGES)
+    startup_error: Exception | None = None
 
-    try:
-        async with AsyncCamoufox(
-            headless=True,
-            screen=Screen(max_width=1_920, max_height=1_080),
-        ) as browser:
-            tasks = [
-                _scrape_hit(
-                    browser,
-                    hit,
-                    semaphore=semaphore,
-                    safety_checker=safety_checker,
+    for attempt in range(_CAMOUFOX_FD_LAUNCH_ATTEMPTS):
+        try:
+            # Camoufox normally builds these options in an executor. Its add-on setup
+            # creates a multiprocessing.Lock there, which can race Python's resource
+            # tracker in long-lived async/TUI processes and raise
+            # ``ValueError: bad value(s) in fds_to_keep``. Build synchronously on the
+            # caller's event-loop thread and pass the finished options to Camoufox.
+            from_options = build_camoufox_launch_options(
+                headless=True,
+                screen=Screen(max_width=1_920, max_height=1_080),
+            )
+            async with AsyncCamoufox(from_options=from_options) as browser:
+                tasks = [
+                    _scrape_hit(
+                        browser,
+                        hit,
+                        semaphore=semaphore,
+                        safety_checker=safety_checker,
+                    )
+                    for hit in hits
+                ]
+                return tuple(await asyncio.gather(*tasks))
+        except ScrapeError:
+            raise
+        except Exception as exc:
+            startup_error = exc
+            if _is_fds_to_keep_error(exc) and attempt + 1 < _CAMOUFOX_FD_LAUNCH_ATTEMPTS:
+                # Camoufox 0.5.4 tears down its Playwright driver on failed entry, so
+                # yielding once before a clean retry does not leak a browser process.
+                await asyncio.sleep(0)
+                continue
+            break
+
+    # A browser launch should not make all grounded web research unavailable. Direct
+    # HTTP cannot render JavaScript applications, but it reliably covers ordinary
+    # filings, annual reports, company pages and news articles while retaining the
+    # same SSRF checks, content limits and cleaning pipeline.
+    assert startup_error is not None
+    return await _scrape_hits_via_http(
+        hits,
+        safety_checker=safety_checker,
+        browser_error=_friendly_error(startup_error),
+    )
+
+
+def _is_fds_to_keep_error(error: BaseException) -> bool:
+    """Recognize the transient macOS/Python subprocess descriptor launch failure."""
+    current: BaseException | None = error
+    while current is not None:
+        if "bad value(s) in fds_to_keep" in str(current):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+async def _scrape_hits_via_http(
+    hits: tuple[_SearchHit, ...],
+    *,
+    safety_checker: _UrlSafetyChecker,
+    browser_error: str,
+) -> tuple[SourceResult, ...]:
+    """Scrape server-rendered HTML when the headless browser cannot initialize."""
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_PAGES)
+    timeout = httpx.Timeout(_HTTP_FALLBACK_TIMEOUT_SECONDS)
+    async with httpx.AsyncClient(
+        headers=_HTTP_FALLBACK_HEADERS,
+        timeout=timeout,
+        follow_redirects=False,
+        http2=True,
+    ) as client:
+        tasks = [
+            _scrape_hit_via_http(
+                client,
+                hit,
+                semaphore=semaphore,
+                safety_checker=safety_checker,
+                browser_error=browser_error,
+            )
+            for hit in hits
+        ]
+        return tuple(await asyncio.gather(*tasks))
+
+
+async def _scrape_hit_via_http(
+    client: httpx.AsyncClient,
+    hit: _SearchHit,
+    *,
+    semaphore: asyncio.Semaphore,
+    safety_checker: _UrlSafetyChecker,
+    browser_error: str,
+) -> SourceResult:
+    """Fetch one HTML page with bounded manual redirects and response size."""
+    async with semaphore:
+        current_url = hit.url
+        try:
+            for redirect_count in range(_HTTP_FALLBACK_MAX_REDIRECTS + 1):
+                if not await safety_checker.is_public_http_url(current_url):
+                    raise ValueError("URL does not resolve to a public HTTP(S) address")
+
+                async with client.stream("GET", current_url) as response:
+                    if response.status_code in _HTTP_REDIRECT_STATUSES:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise ValueError("Redirect response omitted the Location header")
+                        if redirect_count == _HTTP_FALLBACK_MAX_REDIRECTS:
+                            raise ValueError("Too many redirects")
+                        current_url = urljoin(current_url, location)
+                        continue
+
+                    if response.status_code >= 400:
+                        raise ValueError(f"Page returned HTTP {response.status_code}")
+
+                    content_type = response.headers.get("content-type", "").casefold()
+                    if (
+                        content_type
+                        and "html" not in content_type
+                        and "xhtml" not in content_type
+                    ):
+                        raise ValueError(
+                            f"Unsupported content type: {content_type.split(';', 1)[0]}"
+                        )
+
+                    declared_length = response.headers.get("content-length")
+                    if declared_length:
+                        try:
+                            parsed_length = int(declared_length)
+                        except ValueError:
+                            parsed_length = 0
+                        if parsed_length > _HTTP_FALLBACK_MAX_BYTES:
+                            raise ValueError("HTML response exceeds the size limit")
+
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > _HTTP_FALLBACK_MAX_BYTES:
+                            raise ValueError("HTML response exceeds the size limit")
+
+                    encoding = response.encoding or "utf-8"
+                    rendered_html = bytes(body).decode(encoding, errors="replace")
+
+                clean_content = await asyncio.to_thread(
+                    extract_clean_text,
+                    rendered_html,
+                    url=current_url,
+                    max_characters=_MAX_SOURCE_CHARACTERS,
+                    minimum_characters=_MIN_SOURCE_CHARACTERS,
                 )
-                for hit in hits
-            ]
-            return tuple(await asyncio.gather(*tasks))
-    except ScrapeError:
-        raise
-    except Exception as exc:
-        raise ScrapeError(f"Camoufox could not start: {_friendly_error(exc)}") from exc
+                return SourceResult(
+                    source_id=hit.source_id,
+                    title=hit.title,
+                    url=current_url,
+                    status=ScrapeStatus.SUCCESS,
+                    content=clean_content,
+                )
+
+            raise AssertionError("HTTP redirect loop exited unexpectedly")
+        except Exception as exc:
+            return _failed_source(
+                hit,
+                f"HTTP fallback failed: {_friendly_error(exc)}; "
+                f"browser startup also failed: {browser_error}",
+            )
 
 
 async def _scrape_hit(
