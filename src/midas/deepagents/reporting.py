@@ -17,8 +17,9 @@ from .prompts import REQUIRED_RESEARCH_ARTIFACTS
 
 _OUTPUT_ROOT = Path("output/research")
 _TECTONIC_BINARY = "/opt/homebrew/bin/tectonic"
-_SOURCE_LEDGER_HEADING = re.compile(r"(?im)^##\s+Source ledger\s*$")
+REPORT_MARKDOWN = "08_final_report.md"
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+_BARE_URL = re.compile(r"https?://[^\s<>]+")
 _INLINE_CODE = re.compile(r"`([^`]+)`")
 _BOLD = re.compile(r"\*\*([^*]+)\*\*")
 
@@ -67,13 +68,23 @@ def _validate_artifacts(run_directory: Path) -> list[tuple[str, str]]:
         if not content:
             errors.append(f"empty {name}")
             continue
-        if not _SOURCE_LEDGER_HEADING.search(content):
-            errors.append(f"{name} has no `## Source ledger` section")
-            continue
         artifacts.append((name, content))
     if errors:
         raise ValueError("Research artifact validation failed: " + "; ".join(errors))
     return artifacts
+
+
+def _read_report(run_directory: Path) -> list[tuple[str, str]]:
+    path = run_directory / REPORT_MARKDOWN
+    if not path.is_file():
+        raise ValueError(
+            f"missing {REPORT_MARKDOWN}; the report agent must synthesize it from "
+            "the research Markdown files before rendering"
+        )
+    content = path.read_text(encoding="utf-8").strip()
+    if not content:
+        raise ValueError(f"empty {REPORT_MARKDOWN}")
+    return [(REPORT_MARKDOWN, content)]
 
 
 def _latex_escape(text: str) -> str:
@@ -108,6 +119,10 @@ def _inline_to_latex(text: str) -> str:
         return stash(rf"\href{{\detokenize{{{url}}}}}{{{label}}}")
 
     text = _MARKDOWN_LINK.sub(link, text)
+    text = _BARE_URL.sub(
+        lambda match: stash(rf"\url{{{match.group(0)}}}"),
+        text,
+    )
     text = _INLINE_CODE.sub(
         lambda match: stash(rf"\texttt{{{_latex_escape(match.group(1))}}}"),
         text,
@@ -136,12 +151,14 @@ def _table_to_latex(lines: list[str]) -> str:
     body = [
         r"\begin{longtable}{" + (" ".join([spec] * width)) + "}",
         r"\toprule",
-        " & ".join(_inline_to_latex(cell) for cell in normalized[0]) + r" \\",
+        " & ".join(_inline_to_latex(cell) for cell in normalized[0]) + r" \\[0pt]",
         r"\midrule",
         r"\endhead",
     ]
     for row in normalized[1:]:
-        body.append(" & ".join(_inline_to_latex(cell) for cell in row) + r" \\")
+        # An explicit spacing argument prevents a following cell such as "[S02]"
+        # from being parsed as the optional argument to LaTeX's row break.
+        body.append(" & ".join(_inline_to_latex(cell) for cell in row) + r" \\[0pt]")
     body.extend([r"\bottomrule", r"\end{longtable}"])
     return "\n".join(body)
 
@@ -291,11 +308,11 @@ Selections are candidates for deeper research, not buy or sell recommendations.
 
 @tool("generate_report")
 def generate_report(run_directory: str, title: str | None = None) -> str:
-    """Validate a completed Midas research run and compile its Markdown into a PDF.
+    """Render the report agent's synthesized Markdown report as a PDF.
 
-    This is a publication-only tool: it reads the required 00–07 Markdown artifacts
-    in numeric order, preserves their text and citations, renders a controlled LaTeX
-    document with Tectonic, and publishes ``final_report.pdf`` in the run directory.
+    The report agent must first read the completed 00–07 research artifacts and write
+    a coherent narrative to ``08_final_report.md``. This tool renders only that
+    synthesized document; it never concatenates the raw research artifacts.
 
     Args:
         run_directory: Completed directory under ``output/research``.
@@ -303,7 +320,7 @@ def generate_report(run_directory: str, title: str | None = None) -> str:
     """
     try:
         resolved_run = _resolve_run_directory(run_directory)
-        artifacts = _validate_artifacts(resolved_run)
+        artifacts = _read_report(resolved_run)
         default_title = f"{resolved_run.parent.name.replace('-', ' ').title()} Research Report"
         report_title = (title or default_title).strip()
         if not report_title:

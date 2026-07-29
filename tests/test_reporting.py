@@ -28,6 +28,11 @@ def _make_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             ),
             encoding="utf-8",
         )
+    (run / reporting.REPORT_MARKDOWN).write_text(
+        "# Final Research Report\n\n"
+        "This is a synthesized narrative based on the completed research.\n",
+        encoding="utf-8",
+    )
     return run
 
 
@@ -50,20 +55,22 @@ def test_resolve_run_directory_rejects_path_outside_research_root(
         reporting._resolve_run_directory(str(tmp_path))
 
 
-def test_validate_artifacts_reports_missing_and_missing_ledger(
+def test_validate_artifacts_requires_files_but_not_specific_markdown_sections(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run = _make_run(tmp_path, monkeypatch)
-    (run / "03_primary_selection.md").unlink()
     (run / "02_primary_research.md").write_text("# No ledger", encoding="utf-8")
 
+    artifacts = reporting._validate_artifacts(run)
+    assert dict(artifacts)["02_primary_research.md"] == "# No ledger"
+
+    (run / "03_primary_selection.md").unlink()
     with pytest.raises(ValueError) as error:
         reporting._validate_artifacts(run)
 
     message = str(error.value)
     assert "missing 03_primary_selection.md" in message
-    assert "02_primary_research.md has no `## Source ledger` section" in message
 
 
 def test_markdown_renderer_escapes_latex_and_supports_tables() -> None:
@@ -76,6 +83,28 @@ def test_markdown_renderer_escapes_latex_and_supports_tables() -> None:
     assert r"\&" in rendered
     assert r"\textbf{A\_B}" in rendered
     assert r"\begin{longtable}" in rendered
+
+
+def test_markdown_renderer_safely_handles_bare_urls_in_tables() -> None:
+    rendered = reporting._markdown_to_latex(
+        "| Source | URL |\n"
+        "| --- | --- |\n"
+        "| NSE | https://example.com/report?symbol=NIFTY%20MID%20SELECT |\n"
+    )
+
+    assert r"\url{https://example.com/report?symbol=NIFTY%20MID%20SELECT}" in rendered
+
+
+def test_table_rows_cannot_treat_bracketed_source_ids_as_spacing() -> None:
+    rendered = reporting._markdown_to_latex(
+        "| Source | Title |\n"
+        "| --- | --- |\n"
+        "| [S01] | First |\n"
+        "| [S02] | Second |\n"
+    )
+
+    assert r"First \\[0pt]" in rendered
+    assert r"[S02] & Second" in rendered
 
 
 def test_generate_report_compiles_and_publishes_pdf(
@@ -103,7 +132,7 @@ def test_generate_report_compiles_and_publishes_pdf(
 
     assert response["ok"] is True
     assert response["status"] == "compiled"
-    assert response["included_files"] == list(REQUIRED_RESEARCH_ARTIFACTS)
+    assert response["included_files"] == [reporting.REPORT_MARKDOWN]
     assert Path(response["pdf_path"]).parent == run
     assert Path(response["pdf_path"]).read_bytes().startswith(b"%PDF")
 
@@ -123,6 +152,23 @@ def test_generate_report_returns_structured_failure(
     assert response["ok"] is False
     assert response["status"] == "failed"
     assert "does not exist" in response["error"]
+
+
+def test_generate_report_requires_synthesized_report_markdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _make_run(tmp_path, monkeypatch)
+    (run / reporting.REPORT_MARKDOWN).unlink()
+
+    response = json.loads(
+        reporting.generate_report.invoke(
+            {"run_directory": "/output/research/nifty-it/20260729T120000Z"}
+        )
+    )
+
+    assert response["ok"] is False
+    assert f"missing {reporting.REPORT_MARKDOWN}" in response["error"]
 
 
 def test_generate_report_does_not_publish_failed_compilation(

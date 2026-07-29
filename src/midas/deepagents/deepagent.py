@@ -4,8 +4,6 @@ from typing import Any
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 from deepagents.middleware.filesystem import FilesystemPermission
-from langchain.agents import create_agent
-
 from .model import get_main_model, get_research_model, get_summarizer_model
 from .prompts import (
     ADVERSARIAL_AGENT_PROMPT,
@@ -59,6 +57,13 @@ returned immediately because another tool from that source is still running. Wai
 that request to finish, then retry the tool yourself; do not start another tool from
 the same source in the meantime.
 
+Run all scraping and market-data tools sequentially, never in parallel. This includes
+Screener, signals provider, NSE, trading-history, calendar, deals, derivatives,
+institutional-activity, and market-context tools. Complete one such call and receive
+its tool result before starting the next. Only web_research calls are exempt from
+this cross-tool sequencing rule, although web_research's own source gate and any busy
+response must still be respected.
+
 Finish with a concise, decision-useful synthesis: key findings, important risks or
 unknowns, and the evidence behind them. This is research, not personalized financial
 advice; avoid telling the user to buy or sell a security.
@@ -68,12 +73,21 @@ MIDAS_SYSTEM_PROMPT = f"{MIDAS_PRIMARY_SYSTEM_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}"
 
 
 def build_subagents() -> list[dict[str, Any]]:
-    """Build the two research roles and the publication-only report role."""
+    """Build the two research roles and the narrative report role."""
     research_model = get_research_model()
-    report_runnable = create_agent(
-        get_summarizer_model(),
+    report_runnable = create_deep_agent(
+        model=get_summarizer_model(),
         tools=REPORT_TOOLS,
         system_prompt=REPORT_AGENT_PROMPT,
+        backend=FilesystemBackend(root_dir=Path.cwd(), virtual_mode=True),
+        permissions=[
+            FilesystemPermission(
+                operations=["write"],
+                paths=["/output/research/**"],
+                mode="allow",
+            ),
+            FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
+        ],
         name="report-agent",
     )
     return [
@@ -101,8 +115,8 @@ def build_subagents() -> list[dict[str, Any]]:
         {
             "name": "report-agent",
             "description": (
-                "Publication-only agent used after all eight Markdown artifacts pass "
-                "validation. It can only compile the completed run into a PDF."
+                "Narrative report editor used after all eight research artifacts are "
+                "complete. It reads them, writes a polished report, and renders a PDF."
             ),
             "runnable": report_runnable,
         },

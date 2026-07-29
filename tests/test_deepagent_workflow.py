@@ -53,7 +53,7 @@ def test_research_tool_names_are_unique() -> None:
 
 
 def test_research_and_adversarial_roles_receive_the_primary_research_tools() -> None:
-    from midas.deepagents.deepagent import build_subagents
+    from midas.deepagents.deepagent import MIDAS_TOOL_GUIDANCE, build_subagents
 
     by_name = {spec["name"]: spec for spec in build_subagents()}
 
@@ -61,4 +61,9 @@ def test_research_and_adversarial_roles_receive_the_primary_research_tools() -> 
     assert by_name["adversarial-agent"]["tools"] is MIDAS_TOOLS
     report_runnable = by_name["report-agent"]["runnable"]
     report_tool_node = report_runnable.nodes["tools"].bound
-    assert set(report_tool_node.tools_by_name) == {"generate_report"}
+    assert "generate_report" in report_tool_node.tools_by_name
+    assert {"read_file", "write_file"}.issubset(report_tool_node.tools_by_name)
+    assert "Run all scraping and market-data tools sequentially, never in parallel" in (
+        MIDAS_TOOL_GUIDANCE
+    )
+    assert "Only web_research calls are exempt" in MIDAS_TOOL_GUIDANCE
