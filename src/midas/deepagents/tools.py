@@ -6,22 +6,51 @@ which follow-up lookup to make without receiving the full raw scraper payload.
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import shutil
 import subprocess
 import tempfile
 import threading
+from datetime import date
 from enum import StrEnum
+from functools import wraps
 from typing import Annotated, Any
 
 from langchain_core.tools import BaseTool, tool
 from langgraph.config import get_stream_writer
 from pydantic import Field
 
+from ..market_data import (
+    fetch_equity_event_calendar,
+    fetch_equity_trading_history,
+    fetch_exchange_deals,
+    fetch_india_market_context,
+    fetch_institutional_activity,
+    fetch_nse_company_filings,
+    fetch_nse_derivatives_snapshot,
+    fetch_nse_equity_snapshot,
+    fetch_nse_market_scan,
+)
 from ..pipeline import MidasError, search_and_scrape
 from ..fundamentals import FundamentalsError, scrape_company
 from ..signals import signals providerError, scrape_signals
+from .charts import (  # noqa: F401
+    CHART_TOOLS,
+    ChartDatum,
+    ChartSeries,
+    HeatmapCell,
+    ScatterPoint,
+    generate_area_chart,
+    generate_bar_chart,
+    generate_heatmap_chart,
+    generate_horizontal_bar_chart,
+    generate_line_chart,
+    generate_pie_chart,
+    generate_scatter_chart,
+    generate_stacked_bar_chart,
+)
 
 TWITTER_SEARCH_MAX_CALLS = 2
 """Default maximum number of Grok/X searches available to one agent."""
@@ -30,7 +59,97 @@ _TWITTER_SEARCH_TIMEOUT_S = 60
 
 _NSE_EQUITY_MARKET_URL = "https://www.nseindia.com/market-data/live-equity-market"
 
+_MARKET_TOOL_ERRORS = (
+    OSError,
+    TimeoutError,
+    ConnectionError,
+    ImportError,
+    ValueError,
+    RuntimeError,
+    KeyError,
+    TypeError,
+)
+
 ai_log = logging.getLogger(__name__)
+
+_SOURCE_WEB = "web"
+_SOURCE_FUNDAMENTALS = "screener"
+_SOURCE_SIGNALS = "trendlyne"
+_SOURCE_NSE = "nse"
+_SOURCE_X = "x"
+
+
+class _SourceConcurrencyGate:
+    """Allow at most one active agent tool call per upstream source."""
+
+    def __init__(self) -> None:
+        self._active: set[str] = set()
+        self._lock = threading.Lock()
+
+    def try_acquire(self, source: str) -> bool:
+        """Reserve ``source`` without waiting; return whether it was reserved."""
+        with self._lock:
+            if source in self._active:
+                return False
+            self._active.add(source)
+            return True
+
+    def release(self, source: str) -> None:
+        """Release a previously reserved source."""
+        with self._lock:
+            self._active.discard(source)
+
+
+_SOURCE_GATE = _SourceConcurrencyGate()
+
+
+def _source_busy_response(source: str, tool_name: str) -> str:
+    """Tell the agent that a same-source call is still running."""
+    return _json(
+        {
+            "ok": False,
+            "status": "busy",
+            "retryable": True,
+            "source": source,
+            "tool": tool_name,
+            "message": (
+                f"Another {source} tool is already running. Wait for it to finish, "
+                f"then retry {tool_name}; do not start another {source} tool while "
+                "it is busy."
+            ),
+        }
+    )
+
+
+def _source_limited(source: str, tool_name: str):
+    """Decorate sync or async tools with a non-blocking source gate."""
+
+    def decorator(function):
+        if inspect.iscoroutinefunction(function):
+
+            @wraps(function)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                if not _SOURCE_GATE.try_acquire(source):
+                    return _source_busy_response(source, tool_name)
+                try:
+                    return await function(*args, **kwargs)
+                finally:
+                    _SOURCE_GATE.release(source)
+
+            return async_wrapper
+
+        @wraps(function)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            if not _SOURCE_GATE.try_acquire(source):
+                return _source_busy_response(source, tool_name)
+            try:
+                return function(*args, **kwargs)
+            finally:
+                _SOURCE_GATE.release(source)
+
+        return sync_wrapper
+
+    return decorator
 
 
 class NseIndex(StrEnum):
@@ -163,6 +282,39 @@ class NseIndex(StrEnum):
     SECURITIES_IN_F_AND_O = "SECURITIES IN F&O"
 
 
+class MarketContextIndex(StrEnum):
+    """High-value Nifty benchmarks supported by ``india_market_context``."""
+
+    NIFTY_50 = "NIFTY 50"
+    NIFTY_BANK = "NIFTY BANK"
+    NIFTY_IT = "NIFTY IT"
+    NIFTY_AUTO = "NIFTY AUTO"
+    NIFTY_METAL = "NIFTY METAL"
+    NIFTY_PHARMA = "NIFTY PHARMA"
+    NIFTY_ENERGY = "NIFTY ENERGY"
+    NIFTY_OIL_AND_GAS = "NIFTY OIL AND GAS"
+
+
+class McxCommodity(StrEnum):
+    """Research-relevant MCX spot commodities supported by the context tool."""
+
+    CRUDEOIL = "CRUDEOIL"
+    GOLD = "GOLD"
+    SILVER = "SILVER"
+    COPPER = "COPPER"
+    ALUMINIUM = "ALUMINIUM"
+    ZINC = "ZINC"
+    NATURALGAS = "NATURALGAS"
+
+
+class DealType(StrEnum):
+    """Exchange-reported transaction categories supported by ``exchange_deals``."""
+
+    BULK = "bulk"
+    BLOCK = "block"
+    SHORT = "short"
+
+
 def _json(data: dict[str, Any]) -> str:
     """Serialize tool output consistently for model consumption."""
     return json.dumps(data, ensure_ascii=False, default=str)
@@ -282,6 +434,7 @@ def build_twitter_search_tool(max_calls: int = TWITTER_SEARCH_MAX_CALLS) -> Base
     )
 
     @tool("twitter_search", description=description)
+    @_source_limited(_SOURCE_X, "twitter_search")
     def limited_twitter_search(
         query: Annotated[
             str,
@@ -331,6 +484,7 @@ twitter_search = build_twitter_search_tool()
 
 
 @tool("web_research")
+@_source_limited(_SOURCE_WEB, "web_research")
 async def web_research(query: str, max_results: int = 5) -> str:
     """Search the public web and summarize only the pages Midas successfully scraped.
 
@@ -367,6 +521,7 @@ async def web_research(query: str, max_results: int = 5) -> str:
 
 
 @tool("company_fundamentals")
+@_source_limited(_SOURCE_FUNDAMENTALS, "company_fundamentals")
 async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
     """Fetch normal fundamentals provider company fundamentals and market data for an NSE symbol.
 
@@ -404,6 +559,7 @@ async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
 
 
 @tool("earnings_transcripts")
+@_source_limited(_SOURCE_FUNDAMENTALS, "earnings_transcripts")
 async def earnings_transcripts(
     symbol: str,
     consolidated: bool = False,
@@ -456,6 +612,7 @@ async def earnings_transcripts(
 
 
 @tool("market_signals")
+@_source_limited(_SOURCE_SIGNALS, "market_signals")
 async def market_signals(symbol: str) -> str:
     """Fetch high-impact free signals provider signals that Screener does not cover well.
 
@@ -490,6 +647,7 @@ async def market_signals(symbol: str) -> str:
 
 
 @tool("nse_list_index")
+@_source_limited(_SOURCE_NSE, "nse_list_index")
 def nse_list_index(
     index: Annotated[
         NseIndex,
@@ -515,7 +673,7 @@ def nse_list_index(
     ai_log.info("Listing NSE index constituents for %s", index.value)
     try:
         raw = _fetch_nse_index_list(index)
-    except (OSError, TimeoutError, ConnectionError, ImportError, ValueError, RuntimeError) as exc:
+    except _MARKET_TOOL_ERRORS as exc:
         return _json(
             {
                 "ok": False,
@@ -553,6 +711,301 @@ def nse_list_index(
     )
 
 
+@tool("nse_company_filings")
+@_source_limited(_SOURCE_NSE, "nse_company_filings")
+def nse_company_filings(
+    symbol: str,
+    lookback_days: int = 90,
+    limit_per_section: int = 10,
+) -> str:
+    """Fetch official NSE filing feeds for one company through an unofficial client.
+
+    Use for recent announcements, corporate actions, board meetings, result
+    filings, quarterly result comparisons, shareholding, and annual-report links.
+    A failure in one feed is reported as a warning without discarding other feeds.
+
+    Args:
+        symbol: NSE equity symbol, for example RELIANCE, TCS, or INFY.
+        lookback_days: Filing lookback from 1 to 365 days (default 90).
+        limit_per_section: Maximum rows returned per section, from 1 to 25.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return _json({"ok": False, "error": "symbol must not be empty"})
+    if not 1 <= lookback_days <= 365:
+        return _json({"ok": False, "symbol": symbol, "error": "lookback_days must be 1..365"})
+    if not 1 <= limit_per_section <= 25:
+        return _json(
+            {"ok": False, "symbol": symbol, "error": "limit_per_section must be 1..25"}
+        )
+    ai_log.info("Fetching NSE company filings for %s", symbol)
+    try:
+        result = fetch_nse_company_filings(
+            symbol,
+            lookback_days=lookback_days,
+            limit_per_section=limit_per_section,
+        )
+    except _MARKET_TOOL_ERRORS as exc:
+        return _json({"ok": False, "symbol": symbol, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("nse_equity_snapshot")
+@_source_limited(_SOURCE_NSE, "nse_equity_snapshot")
+def nse_equity_snapshot(symbol: str) -> str:
+    """Fetch a live NSE equity quote and security identity snapshot.
+
+    Use for current price, OHLC, volume, delivery, price bands, 52-week context,
+    security status, ISIN, and F&O/ETF classification. Use Screener instead for
+    financial statements, ratios, and peers.
+
+    Args:
+        symbol: NSE equity symbol, for example RELIANCE, TCS, or INFY.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return _json({"ok": False, "error": "symbol must not be empty"})
+    ai_log.info("Fetching NSE equity snapshot for %s", symbol)
+    try:
+        result = fetch_nse_equity_snapshot(symbol)
+    except _MARKET_TOOL_ERRORS as exc:
+        return _json({"ok": False, "symbol": symbol, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("equity_trading_history")
+@_source_limited(_SOURCE_NSE, "equity_trading_history")
+def equity_trading_history(symbol: str, lookback_days: int = 90) -> str:
+    """Summarize NSE price, volume, volatility, drawdown, and delivery history.
+
+    Returns compact performance statistics plus at most ten recent observations,
+    not an unbounded daily series.
+
+    Args:
+        symbol: NSE equity symbol, for example RELIANCE, TCS, or INFY.
+        lookback_days: Calendar-day lookback from 7 to 1825 days.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return _json({"ok": False, "error": "symbol must not be empty"})
+    if not 7 <= lookback_days <= 1825:
+        return _json({"ok": False, "symbol": symbol, "error": "lookback_days must be 7..1825"})
+    ai_log.info("Fetching %d-day NSE trading history for %s", lookback_days, symbol)
+    try:
+        result = fetch_equity_trading_history(symbol, lookback_days=lookback_days)
+    except _MARKET_TOOL_ERRORS as exc:
+        return _json({"ok": False, "symbol": symbol, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("nse_market_scan")
+@_source_limited(_SOURCE_NSE, "nse_market_scan")
+def nse_market_scan(
+    index: NseIndex = NseIndex.NIFTY_500,
+    limit: int = 10,
+) -> str:
+    """Scan an NSE universe for breadth, movers, activity, and India VIX context.
+
+    Args:
+        index: NSE index or equity universe to scan (default NIFTY 500).
+        limit: Maximum gainers, losers, volume gainers, and active rows, from 1 to 25.
+    """
+    if not 1 <= limit <= 25:
+        return _json({"ok": False, "index": index.value, "error": "limit must be 1..25"})
+    ai_log.info("Scanning %s market breadth and movers", index.value)
+    try:
+        result = fetch_nse_market_scan(index.value, limit=limit)
+    except _MARKET_TOOL_ERRORS as exc:
+        return _json({"ok": False, "index": index.value, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("equity_event_calendar")
+@_source_limited(_SOURCE_NSE, "equity_event_calendar")
+def equity_event_calendar(
+    symbol: str | None = None,
+    lookback_days: int = 7,
+    forward_days: int = 30,
+    limit_per_section: int = 25,
+) -> str:
+    """Find recent and upcoming NSE equity results and corporate events.
+
+    Use without a symbol for catalyst discovery across the market, or provide one
+    to filter results, board events, dividends, splits, bonuses, and other actions.
+
+    Args:
+        symbol: Optional NSE equity symbol.
+        lookback_days: Days before today to include, from 0 to 90.
+        forward_days: Days after today to include, from 1 to 365.
+        limit_per_section: Maximum rows returned per section, from 1 to 50.
+    """
+    normalized_symbol = symbol.strip().upper() if symbol else None
+    if symbol is not None and not normalized_symbol:
+        return _json({"ok": False, "error": "symbol must not be blank"})
+    if not 0 <= lookback_days <= 90:
+        return _json({"ok": False, "error": "lookback_days must be 0..90"})
+    if not 1 <= forward_days <= 365:
+        return _json({"ok": False, "error": "forward_days must be 1..365"})
+    if not 1 <= limit_per_section <= 50:
+        return _json({"ok": False, "error": "limit_per_section must be 1..50"})
+    ai_log.info("Fetching NSE event calendar for %s", normalized_symbol or "the market")
+    try:
+        result = fetch_equity_event_calendar(
+            normalized_symbol,
+            lookback_days=lookback_days,
+            forward_days=forward_days,
+            limit=limit_per_section,
+        )
+    except _MARKET_TOOL_ERRORS as exc:
+        return _json({"ok": False, "symbol": normalized_symbol, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("exchange_deals")
+@_source_limited(_SOURCE_NSE, "exchange_deals")
+def exchange_deals(
+    symbol: str | None = None,
+    lookback_days: int = 30,
+    deal_types: list[DealType] | None = None,
+    limit_per_type: int = 25,
+) -> str:
+    """Fetch NSE bulk deals, block deals, and reported short-selling activity.
+
+    Args:
+        symbol: Optional NSE equity symbol; omit for market-wide activity.
+        lookback_days: Calendar-day lookback from 1 to 365.
+        deal_types: Categories to fetch; defaults to bulk, block, and short.
+        limit_per_type: Maximum rows returned for each category, from 1 to 50.
+    """
+    normalized_symbol = symbol.strip().upper() if symbol else None
+    if symbol is not None and not normalized_symbol:
+        return _json({"ok": False, "error": "symbol must not be blank"})
+    if not 1 <= lookback_days <= 365:
+        return _json({"ok": False, "error": "lookback_days must be 1..365"})
+    if not 1 <= limit_per_type <= 50:
+        return _json({"ok": False, "error": "limit_per_type must be 1..50"})
+    selected = deal_types or [DealType.BULK, DealType.BLOCK, DealType.SHORT]
+    names = list(dict.fromkeys(item.value for item in selected))
+    if not names:
+        return _json({"ok": False, "error": "deal_types must not be empty"})
+    ai_log.info("Fetching exchange deals for %s", normalized_symbol or "the market")
+    try:
+        result = fetch_exchange_deals(
+            normalized_symbol,
+            lookback_days=lookback_days,
+            deal_types=names,
+            limit=limit_per_type,
+        )
+    except _MARKET_TOOL_ERRORS as exc:
+        return _json({"ok": False, "symbol": normalized_symbol, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("nse_derivatives_snapshot")
+@_source_limited(_SOURCE_NSE, "nse_derivatives_snapshot")
+def nse_derivatives_snapshot(
+    symbol: str,
+    expiry: str | None = None,
+    strikes_each_side: int = 5,
+) -> str:
+    """Summarize an NSE option chain around ATM with positioning and risk context.
+
+    Returns PCR, max pain, maximum call/put OI, OI changes, lot size, F&O-ban
+    status, and a bounded strike window. The nearest expiry is used by default.
+
+    Args:
+        symbol: NSE F&O equity or index, for example TCS, NIFTY, or BANKNIFTY.
+        expiry: Optional ISO expiry date (YYYY-MM-DD); omit for nearest expiry.
+        strikes_each_side: Number of strikes on each side of ATM, from 1 to 10.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return _json({"ok": False, "error": "symbol must not be empty"})
+    parsed_expiry: date | None = None
+    if expiry:
+        try:
+            parsed_expiry = date.fromisoformat(expiry)
+        except ValueError:
+            return _json({"ok": False, "symbol": symbol, "error": "expiry must use YYYY-MM-DD"})
+        if parsed_expiry < date.today():
+            return _json({"ok": False, "symbol": symbol, "error": "expiry cannot be in the past"})
+    if not 1 <= strikes_each_side <= 10:
+        return _json({"ok": False, "symbol": symbol, "error": "strikes_each_side must be 1..10"})
+    ai_log.info("Fetching NSE derivatives snapshot for %s", symbol)
+    try:
+        result = fetch_nse_derivatives_snapshot(
+            symbol,
+            expiry=parsed_expiry,
+            strikes_each_side=strikes_each_side,
+        )
+    except _MARKET_TOOL_ERRORS as exc:
+        return _json({"ok": False, "symbol": symbol, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("institutional_activity")
+@_source_limited(_SOURCE_NSE, "institutional_activity")
+def institutional_activity(trade_date: str | None = None) -> str:
+    """Fetch latest or historical Indian institutional cash and derivatives reports.
+
+    With no date, returns the latest NSE FII/DII cash data and latest NSDL FPI
+    investment/derivatives reports. With a date, returns date-specific NSDL,
+    participant OI/volume, and FII derivatives reports.
+
+    Args:
+        trade_date: Optional ISO date (YYYY-MM-DD). Omit for latest reports.
+    """
+    parsed_date: date | None = None
+    if trade_date:
+        try:
+            parsed_date = date.fromisoformat(trade_date)
+        except ValueError:
+            return _json({"ok": False, "error": "trade_date must use YYYY-MM-DD"})
+        if parsed_date > date.today():
+            return _json({"ok": False, "error": "trade_date cannot be in the future"})
+    ai_log.info("Fetching %s institutional activity", parsed_date or "latest")
+    try:
+        result = fetch_institutional_activity(parsed_date)
+    except (OSError, TimeoutError, ConnectionError, ImportError, ValueError, RuntimeError) as exc:
+        return _json({"ok": False, "trade_date": trade_date, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
+@tool("india_market_context")
+@_source_limited(_SOURCE_NSE, "india_market_context")
+def india_market_context(
+    index: MarketContextIndex = MarketContextIndex.NIFTY_50,
+    commodities: list[McxCommodity] | None = None,
+    lookback_days: int = 90,
+) -> str:
+    """Summarize a Nifty benchmark, its TRI, and relevant MCX commodity moves.
+
+    Use for market-regime and cross-asset context around an Indian equity. Returns
+    compact performance statistics rather than raw daily series.
+
+    Args:
+        index: Nifty benchmark to summarize (default NIFTY 50).
+        commodities: Up to five MCX commodities (default CRUDEOIL and GOLD).
+        lookback_days: Calendar-day lookback from 7 to 1825 days.
+    """
+    selected = commodities or [McxCommodity.CRUDEOIL, McxCommodity.GOLD]
+    if not 7 <= lookback_days <= 1825:
+        return _json({"ok": False, "error": "lookback_days must be 7..1825"})
+    if not 1 <= len(selected) <= 5:
+        return _json({"ok": False, "error": "commodities must contain 1..5 values"})
+    names = list(dict.fromkeys(item.value for item in selected))
+    ai_log.info("Fetching India market context for %s", index.value)
+    try:
+        result = fetch_india_market_context(
+            index.value,
+            names,
+            lookback_days=lookback_days,
+        )
+    except (OSError, TimeoutError, ConnectionError, ImportError, ValueError, RuntimeError) as exc:
+        return _json({"ok": False, "index": index.value, "error": str(exc)})
+    return _json({"ok": True, **result})
+
+
 MIDAS_TOOLS = (
     send_update,
     web_research,
@@ -560,5 +1013,15 @@ MIDAS_TOOLS = (
     earnings_transcripts,
     market_signals,
     nse_list_index,
+    nse_company_filings,
+    nse_equity_snapshot,
+    equity_trading_history,
+    nse_market_scan,
+    equity_event_calendar,
+    exchange_deals,
+    nse_derivatives_snapshot,
+    institutional_activity,
+    india_market_context,
     twitter_search,
+    *CHART_TOOLS,
 )
