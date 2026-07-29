@@ -313,6 +313,7 @@ async def test_compression_uses_ollama_openai_compatible_chat(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.setattr(pipeline, "load_dotenv", lambda: False)
     monkeypatch.setattr(pipeline, "ChatOpenAI", FakeChatOpenAI)
 
     compressed = await pipeline._compress_sources("query", (successful_source(),))
