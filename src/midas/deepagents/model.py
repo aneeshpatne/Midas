@@ -13,7 +13,7 @@ def get_main_model() -> ChatDeepSeek:
     """
     return ChatDeepSeek(
         model="deepseek-v4-pro",
-        reasoning_effort="max",
+        reasoning_effort="high",
     )
 
 
@@ -24,7 +24,7 @@ def get_research_model() -> ChatDeepSeek:
     Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
     """
     return ChatDeepSeek(
-        model="deepseek-v4-flash",
+        model="deepseek-v4-pro",
         reasoning_effort="high",
     )
 
