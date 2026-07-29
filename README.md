@@ -69,19 +69,23 @@ and is discarded on exit; generated research artifacts remain on disk. Both
 `DEEPSEEK_API_KEY` and `OPENAI_API_KEY` should be configured for the complete staged
 workflow. If either is missing, the interface still opens and displays a setup error.
 
-For a sector or NSE index, Midas runs a staged 12–24 month idea-generation workflow:
+For a sector or NSE index, Midas runs a staged seven-to-ten-year,
+current-price investment-research workflow:
 
 1. A primary research agent screens the complete universe and writes its research,
-   3–5 deeper-research candidates, and explicit elimination logic as Markdown.
+   then proposes the strongest 8–10 companies for equal-depth diligence.
 2. An adversarial agent builds a blind competing screen, then runs a second pass
    challenging the primary selection.
-3. The lead agent verifies disagreements and writes an auditable reconciliation and
-   final shortlist.
-4. A publication-only agent calls its single `generate_report` tool to compile the
+3. A deep-research agent applies the same governance, normalization, valuation,
+   peer, scenario, and expected-return work to every shortlisted company.
+4. The adversarial agent writes independent bear cases, after which the lead makes an
+   auditable investment-committee decision that may select zero to three candidates.
+5. A publication-only agent calls its single `generate_report` tool to compile the
    completed Markdown set into `final_report.pdf` with Tectonic.
 
-Each run is saved under `output/research/<topic>/<timestamp>/`. The output is research
-prioritization, not personalized investment advice or a buy/sell recommendation.
+Each run is saved under `output/research/<topic>/<timestamp>/`. Conclusions are
+evidence-dated research assessments, not personalized investment advice or buy/sell
+recommendations.
 
 Call the whole pipeline with one helper:
 
