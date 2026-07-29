@@ -61,9 +61,15 @@ async def run_topic(topic: str, research_agent: Any) -> str:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="midas",
-        description="Research a topic with the Midas DeepAgent.",
+        description=(
+            "Research an Indian equity sector or NSE index with primary, adversarial, "
+            "and report agents."
+        ),
     )
-    parser.add_argument("topic", help="The company, event, or research question to investigate.")
+    parser.add_argument(
+        "topic",
+        help="Sector, NSE index, company, event, or equity-research question to investigate.",
+    )
     return parser
 
 
