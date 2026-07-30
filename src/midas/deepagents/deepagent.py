@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,21 @@ from .prompts import (
 from .reporting import REPORT_TOOLS
 from .tools import MIDAS_TOOLS
 
+_AGENT_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{7,127}$")
+
 MIDAS_TOOL_GUIDANCE = """Use research tools to gather evidence before factual claims.
+Tool responses use compact envelopes. Treat `summary` as navigation context and
+`artifact.path` as the complete normalized evidence. Read or grep only the relevant
+artifact sections needed for a decisive claim; do not load a whole artifact merely
+to restate its summary. Reuse a returned `result_id` instead of repeating an
+identical lookup.
+
+For multi-company or multi-source screens, prefer one `research_batch` call with
+explicit request IDs. It runs the existing tools sequentially, preserves their
+validation/source limits, and returns artifact pointers for every successful item.
+Do not replace a batch with dozens of single calls unless individual drill-down is
+actually needed.
+
 Start with the complete universe and primary/company evidence: use nse_list_index for
 live NSE constituents and methodology context; nse_company_filings for exchange
 announcements, results, shareholding, governance and corporate actions; Screener for
@@ -46,6 +61,18 @@ share count, market capitalisation, enterprise value or net cash/debt, latest re
 period and material announcements to the same analysis cut-off. Stale or materially
 mismatched inputs cannot support an "at current prices" conclusion. Trace every
 decisive claim through artifact source ledgers to original primary evidence.
+
+For small-cap and mid-cap candidates, use available ownership, equity-snapshot and
+trading-history evidence to calculate free float, median traded value/volume,
+delivery, drawdown, volatility, low-volume and circuit-limit frequency, entry/exit
+days, slippage and stress liquidity. Use direct market evidence for bid-ask spreads
+when available. Never invent an unavailable liquidity field; classify a
+decision-material gap as Insufficient Evidence.
+
+Model the relevant sector/size TRI, broad TRI, Indian government-security benchmark
+and inflation using the same analysis cut-off, horizon, scenario convention and
+annualization basis as the company. Preserve source inputs and do not compare a
+detailed company return model with an assumed index return.
 
 Use the chart tools when a visual summary materially helps: generate_bar_chart,
 generate_horizontal_bar_chart, generate_line_chart, generate_pie_chart,
@@ -92,21 +119,27 @@ sell a security.
 MIDAS_SYSTEM_PROMPT = f"{MIDAS_PRIMARY_SYSTEM_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}"
 
 
-def build_subagents() -> list[dict[str, Any]]:
+def _workspace_prompt(prompt: str, *, isolated: bool) -> str:
+    return prompt.replace("/output/research", "/research") if isolated else prompt
+
+
+def build_subagents(
+    *, workspace: Path | None = None, isolated: bool = False
+) -> list[dict[str, Any]]:
     """Build the screening, challenge, deep-dive, and report roles."""
+    workspace = (workspace or Path.cwd()).resolve()
     research_model = get_research_model()
     report_runnable = create_deep_agent(
         model=get_summarizer_model(),
         tools=REPORT_TOOLS,
-        system_prompt=REPORT_AGENT_PROMPT,
-        backend=FilesystemBackend(root_dir=Path.cwd(), virtual_mode=True),
+        system_prompt=_workspace_prompt(REPORT_AGENT_PROMPT, isolated=isolated),
+        backend=FilesystemBackend(root_dir=workspace, virtual_mode=True),
         permissions=[
             FilesystemPermission(
-                operations=["write"],
-                paths=["/output/research/**"],
+                operations=["read", "write"],
+                paths=["/**"],
                 mode="allow",
             ),
-            FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
         ],
         name="report-agent",
     )
@@ -116,9 +149,12 @@ def build_subagents() -> list[dict[str, Any]]:
             "description": (
                 "Primary Indian-equity screen and shortlist analyst. Use after the "
                 "mandate and complete universe artifacts exist; it writes the primary "
-                "research and eight-to-ten-company shortlist Markdown files."
+                "research and an evidence-determined equal-depth candidate set."
             ),
-            "system_prompt": f"{RESEARCH_AGENT_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}",
+            "system_prompt": _workspace_prompt(
+                f"{RESEARCH_AGENT_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}",
+                isolated=isolated,
+            ),
             "model": research_model,
             "tools": MIDAS_TOOLS,
         },
@@ -129,7 +165,10 @@ def build_subagents() -> list[dict[str, Any]]:
                 "screen, then for an evidence-based critique, and after equal-depth "
                 "research for independent company-by-company bear cases."
             ),
-            "system_prompt": f"{ADVERSARIAL_AGENT_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}",
+            "system_prompt": _workspace_prompt(
+                f"{ADVERSARIAL_AGENT_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}",
+                isolated=isolated,
+            ),
             "model": research_model,
             "tools": MIDAS_TOOLS,
         },
@@ -138,10 +177,13 @@ def build_subagents() -> list[dict[str, Any]]:
             "description": (
                 "Equal-depth company deep-dive analyst. Invoke only after "
                 "06_deep_dive_shortlist.md exists, for identical investment-grade "
-                "diligence on all eight to ten assigned companies; it writes "
+                "diligence on every assigned evidence-qualified company; it writes "
                 "07_equal_depth_deep_research.md."
             ),
-            "system_prompt": f"{DEEP_RESEARCH_AGENT_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}",
+            "system_prompt": _workspace_prompt(
+                f"{DEEP_RESEARCH_AGENT_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}",
+                isolated=isolated,
+            ),
             "model": get_deep_research_model(),
             "tools": MIDAS_TOOLS,
         },
@@ -156,32 +198,39 @@ def build_subagents() -> list[dict[str, Any]]:
     ]
 
 
-def create_midas_agent(*, checkpointer: Any | None = None):
+def create_midas_agent(
+    *,
+    checkpointer: Any | None = None,
+    agent_id: str | None = None,
+    workspace: Path | None = None,
+):
     """Create the staged Midas lead agent with a persistent, restricted workspace."""
-    workspace = Path.cwd()
-    backend = FilesystemBackend(root_dir=workspace, virtual_mode=True)
+    project_workspace = (workspace or Path.cwd()).resolve()
+    if agent_id is None:
+        agent_workspace = project_workspace
+    else:
+        if not _AGENT_ID.fullmatch(agent_id):
+            raise ValueError("agent_id must contain only letters, numbers, hyphens, or underscores")
+        output_root = (project_workspace / "output").resolve()
+        agent_workspace = (output_root / agent_id).resolve()
+        agent_workspace.relative_to(output_root)
+        agent_workspace.mkdir(parents=True, exist_ok=True)
+    backend = FilesystemBackend(root_dir=agent_workspace, virtual_mode=True)
     permissions = [
         FilesystemPermission(
-            operations=["read"],
-            paths=["/.env", "/.env.*", "/.git/**"],
-            mode="deny",
-        ),
-        FilesystemPermission(
-            operations=["write"],
-            paths=["/output/research/**"],
-            mode="allow",
-        ),
-        FilesystemPermission(
-            operations=["write"],
+            operations=["read", "write"],
             paths=["/**"],
-            mode="deny",
+            mode="allow",
         ),
     ]
     return create_deep_agent(
         model=get_main_model(),
         tools=MIDAS_TOOLS,
-        system_prompt=MIDAS_SYSTEM_PROMPT,
-        subagents=build_subagents(),
+        system_prompt=_workspace_prompt(MIDAS_SYSTEM_PROMPT, isolated=agent_id is not None),
+        subagents=build_subagents(
+            workspace=agent_workspace,
+            isolated=agent_id is not None,
+        ),
         backend=backend,
         permissions=permissions,
         checkpointer=checkpointer,

@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 from langchain_core.tools import tool
 
 from .prompts import REQUIRED_RESEARCH_ARTIFACTS
+from .workspace import agent_output_directory, has_isolated_agent_output_directory
 
 _OUTPUT_ROOT = Path("output/research")
 _DEFAULT_BROWSER_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -29,12 +30,16 @@ REPORT_HTML = "10_final_report.html"
 REPORT_PDF = "final_report.pdf"
 
 _REQUIRED_HEADINGS = (
-    "A. Investment decision summary",
-    "B. Candidate funnel",
-    "C. Full finalist comparison",
-    "D. Final selections",
-    "E. Rejected finalists",
-    "F. Final conclusion",
+    "A. Executive Decision Summary",
+    "B. Candidate Funnel",
+    "C. Complete Comparative Matrix",
+    "D. Primary-Source Evidence Map",
+    "E. Governance and Capital-Allocation Matrix",
+    "F. Expected-Return Models",
+    "G. False-Negative Challenge",
+    "H. Final Candidates",
+    "I. Rejected Finalists",
+    "J. Final Conclusion",
 )
 _MARKDOWN_IMAGE = re.compile(
     r"!\[([^\]]*)\]\(\s*(?:<([^>]+)>|\"([^\"]+)\"|'([^']+)'|([^)\s]+))\s*\)"
@@ -50,7 +55,8 @@ def _json(data: dict[str, Any]) -> str:
 
 
 def _research_root() -> Path:
-    return (Path.cwd() / _OUTPUT_ROOT).resolve()
+    relative = Path("research") if has_isolated_agent_output_directory() else _OUTPUT_ROOT
+    return (agent_output_directory() / relative).resolve()
 
 
 def _resolve_run_directory(run_directory: str) -> Path:
@@ -58,10 +64,16 @@ def _resolve_run_directory(run_directory: str) -> Path:
     if not value:
         raise ValueError("run_directory must not be empty")
     candidate = Path(value)
-    if candidate.is_absolute() and candidate.parts[:2] == ("/", "output"):
-        candidate = Path.cwd() / candidate.relative_to("/")
+    if (
+        candidate.is_absolute()
+        and has_isolated_agent_output_directory()
+        and candidate.parts[:2] == ("/", "research")
+    ):
+        candidate = agent_output_directory() / candidate.relative_to("/")
+    elif candidate.is_absolute() and candidate.parts[:2] == ("/", "output"):
+        candidate = agent_output_directory() / candidate.relative_to("/")
     elif not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
+        candidate = agent_output_directory() / candidate
     resolved = candidate.resolve()
     root = _research_root()
     try:
@@ -175,7 +187,10 @@ def _embed_local_images(markdown: str, run_directory: Path) -> str:
         if not candidate.is_absolute():
             candidate = run_directory / candidate
         resolved = candidate.resolve()
-        allowed_roots = (run_directory.resolve(), (Path.cwd() / "output").resolve())
+        output_root = agent_output_directory()
+        if not has_isolated_agent_output_directory():
+            output_root /= "output"
+        allowed_roots = (run_directory.resolve(), output_root.resolve())
         if not any(resolved == root or root in resolved.parents for root in allowed_roots):
             return match.group(0)
         if not resolved.is_file():

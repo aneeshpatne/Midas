@@ -76,7 +76,22 @@ def test_validate_artifacts_requires_files_but_not_specific_markdown_sections(
 
 def test_report_lint_requires_exact_heading_order() -> None:
     with pytest.raises(ValueError, match="top-level headings"):
-        reporting._lint_report("# A. Investment decision summary\n\n# C. Wrong")
+        reporting._lint_report("# A. Executive Decision Summary\n\n# C. Wrong")
+
+
+def test_report_lint_contract_has_all_a_to_j_headings() -> None:
+    assert reporting._REQUIRED_HEADINGS == (
+        "A. Executive Decision Summary",
+        "B. Candidate Funnel",
+        "C. Complete Comparative Matrix",
+        "D. Primary-Source Evidence Map",
+        "E. Governance and Capital-Allocation Matrix",
+        "F. Expected-Return Models",
+        "G. False-Negative Challenge",
+        "H. Final Candidates",
+        "I. Rejected Finalists",
+        "J. Final Conclusion",
+    )
 
 
 def test_report_lint_rejects_tables_wider_than_six_columns() -> None:

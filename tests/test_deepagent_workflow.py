@@ -8,6 +8,7 @@ from midas.deepagents.prompts import (
     REQUIRED_RESEARCH_ARTIFACTS,
     RESEARCH_AGENT_PROMPT,
     SCORING_RUBRIC,
+    SOURCE_AND_ARTIFACT_RULES,
 )
 from midas.deepagents.reporting import REPORT_TOOLS, generate_report
 from midas.deepagents.tools import MIDAS_TOOLS
@@ -28,47 +29,343 @@ def test_research_artifact_contract_is_complete_and_ordered() -> None:
     )
 
 
-def test_primary_prompt_requires_blind_review_before_critique_and_reconciliation() -> None:
+def test_primary_prompt_preserves_staged_independent_review() -> None:
     prompt = " ".join(MIDAS_PRIMARY_SYSTEM_PROMPT.split())
-    independent = prompt.index("BLIND independent screen")
-    critique = prompt.index("red-team review")
-    reconcile = prompt.index("Personally verify")
+    independent = prompt.index("BLIND INDEPENDENT MODE")
+    false_negative = prompt.index("RED-TEAM FALSE-NEGATIVE MODE")
+    reconcile = prompt.index("Personally verify material disagreements")
     deep_research = prompt.index("Launch `deep-research-agent`")
     bear = prompt.index("FINALIST BEAR MODE")
-    committee = prompt.index(
-        "`09_investment_committee_decision.md`"
-    )
+    committee = prompt.index("`09_investment_committee_decision.md`")
     report = prompt.index("Launch `report-agent`")
 
-    assert independent < critique < reconcile
-    assert reconcile < deep_research < bear < committee < report
-    assert "never mechanically average" in prompt
-    assert "zero to three final" in MIDAS_PRIMARY_SYSTEM_PROMPT
-    assert "only report-agent" in MIDAS_PRIMARY_SYSTEM_PROMPT.lower()
+    assert independent < false_negative < reconcile < deep_research
+    assert deep_research < bear < committee < report
+    assert "Never mechanically average" in prompt
+    assert "zero to three selections" in prompt
+    assert "Only report-agent" in MIDAS_PRIMARY_SYSTEM_PROMPT
 
 
-def test_adversarial_prompt_forbids_primary_files_during_blind_pass() -> None:
-    assert "Do not search the run directory for primary research" in ADVERSARIAL_AGENT_PROMPT
-    assert "`02_` or `03_`" in ADVERSARIAL_AGENT_PROMPT
-    assert "critical, material, minor, or unsupported" in ADVERSARIAL_AGENT_PROMPT
-    assert "FINALIST BEAR MODE" in ADVERSARIAL_AGENT_PROMPT
-    assert "strongest reason to own the index" in ADVERSARIAL_AGENT_PROMPT
+def test_objectives_outputs_and_conclusions_are_separate() -> None:
+    standard = INVESTMENT_GRADE_SELECTION_STANDARD
+    for objective in (
+        "best businesses regardless of valuation",
+        "most attractive investments at current prices",
+        "highest priority for deeper research",
+        "suitable for a seven-to-ten-year holding period",
+    ):
+        assert objective in standard
+    for output in (
+        "Best Businesses",
+        "Best-Valued Acceptable Businesses",
+        "Highest-Priority Research Candidates",
+        "High-Quality Companies That Are Currently Too Expensive",
+        "Companies Failing business-quality",
+    ):
+        assert output in standard
+    assert "Business Classification:" in standard
+    assert "Investment Classification at Current Price:" in standard
+    assert "Seven-to-Ten-Year Holding Suitability:" in standard
+    assert "High-quality business — wait for valuation" in standard
 
 
-def test_scoring_rubric_totals_one_hundred() -> None:
+def test_scoring_rubric_is_reproducible_and_refuses_false_precision() -> None:
     rubric = " ".join(SCORING_RUBRIC.split())
     weights = [20, 20, 20, 15, 15, 10]
     assert sum(weights) == 100
-    assert all(f": {weight}" in SCORING_RUBRIC for weight in set(weights))
-    assert "Do not collapse these dimensions into a composite" in rubric
-    assert "why it is not higher" in rubric
-    assert "why it is not lower" in rubric
-    assert "at least 75" in rubric
+    assert all(f"| {weight} |" in SCORING_RUBRIC for weight in set(weights))
+    for requirement in (
+        "evidence supporting it",
+        "evidence against it",
+        "why it is not higher",
+        "why it is not lower",
+        "Evidence Confidence",
+        "source IDs",
+    ):
+        assert requirement in rubric
+    assert "Not scored — Insufficient Evidence" in rubric
+    assert "do not impute zero" in rubric
+    assert "Do not automatically favour asset-light companies" in rubric
+    assert "numeric Valuation Score" in rubric
 
 
-def test_long_horizon_policy_is_shared_by_every_agent_role() -> None:
+def test_candidate_funnel_uses_independent_entry_routes_and_dynamic_depth() -> None:
+    standard = INVESTMENT_GRADE_SELECTION_STANDARD
+    for screen in (
+        "Durable business quality",
+        "Cash-flow quality",
+        "Governance",
+        "Valuation",
+        "Reinvestment runway",
+        "Balance-sheet resilience",
+        "Independent qualitative business-model review",
+    ):
+        assert screen in standard
+    assert "at least two independent" in standard
+    assert "five strongest excluded" in standard
+    assert "deep-dive count is determined by evidence" in standard
+    assert "not a fixed quota" in MIDAS_PRIMARY_SYSTEM_PROMPT
+    assert "eight to ten" not in MIDAS_PRIMARY_SYSTEM_PROMPT.lower()
+
+
+def test_equal_depth_packet_and_missing_evidence_rules_are_complete() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    rules = " ".join(SOURCE_AND_ARTIFACT_RULES.split())
+    for packet_item in (
+        "Business model and industry structure",
+        "Competitive position",
+        "Reinvestment runway",
+        "Historical financials and cash-flow quality",
+        "Balance-sheet quality",
+        "Management and capital allocation",
+        "Governance",
+        "Sector-specific metrics",
+        "Normalized earnings",
+        "Valuation and expected returns",
+        "Liquidity",
+        "Thesis conditions and permanent thesis killers",
+        "Evidence confidence",
+    ):
+        assert packet_item in standard
+    assert "Missing data is not evidence of poor quality" in rules
+    for forbidden_rejection in (
+        "Not reviewed in depth",
+        "Data unavailable",
+        "No near-term catalyst",
+        "No variant wedge",
+        "Appears",
+    ):
+        assert forbidden_rejection in rules
+
+
+def test_sector_specific_analysis_covers_all_required_models() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    for sector in (
+        "Banks:",
+        "NBFCs:",
+        "Consumer companies:",
+        "Industrials and manufacturing:",
+        "Platforms and marketplaces:",
+        "Exchanges and market infrastructure:",
+        "Pharmaceutical companies:",
+        "Commodity and cyclical companies:",
+    ):
+        assert sector in standard
+    for metric in (
+        "slippages",
+        "asset-liability matching",
+        "rural/urban exposure",
+        "incremental ROCE",
+        "multi-homing",
+        "market-coupling risk",
+        "US-generics exposure",
+        "cost-curve position",
+    ):
+        assert metric in standard
+    assert "Never value a cyclical company using peak-cycle earnings" in standard
+
+
+def test_evidence_hierarchy_claim_types_and_conflicts_are_explicit() -> None:
+    rules = " ".join(SOURCE_AND_ARTIFACT_RULES.split())
+    assert rules.index("1. Audited annual reports") < rules.index("2. NSE and BSE filings")
+    for claim_type in (
+        "Company-reported fact",
+        "Regulator-reported fact",
+        "Third-party estimate",
+        "Management claim",
+        "Agent calculation",
+        "Analyst inference",
+        "Unverified claim",
+    ):
+        assert claim_type in rules
+    assert "working papers, not independent evidence" in rules
+    assert "Never silently choose the more convenient number" in rules
+
+
+def test_normalization_governance_and_allocation_contracts_are_complete() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    for item in (
+        "deferred-revenue timing",
+        "working-capital timing",
+        "Reported PAT",
+        "Normalized PAT",
+        "Reported EPS",
+        "Normalized EPS",
+        "maintenance capex",
+        "growth capex",
+        "Normalized FCF",
+        "return on incremental capital",
+    ):
+        assert item in standard
+    for governance_item in (
+        "auditor identity and tenure",
+        "emphasis-of-matter",
+        "exchange penalties",
+        "ESOP dilution",
+        "minority-shareholder disputes",
+        "Requires Monitoring",
+    ):
+        assert governance_item in standard
+    for allocation_item in (
+        "debt issuance",
+        "management's stated rationale",
+        "actual result",
+        "approximate return",
+        "effect on per-share value",
+        "confidence in management increased or decreased",
+    ):
+        assert allocation_item in standard
+
+
+def test_valuation_returns_benchmarks_hurdle_and_zones_are_reproducible() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    assert "at least two appropriate valuation methods" in standard
+    assert "Analyst target prices are not valuation evidence" in standard
+    for zone in ("Attractive", "Reasonable", "Watch", "Full", "Speculative"):
+        assert f"- {zone}" in standard
+    for row in (
+        "Starting normalized revenue",
+        "Terminal margin",
+        "Share-count change",
+        "Terminal EPS or FCF per share",
+        "Cumulative dividends",
+        "Nominal annualized return",
+        "Real annualized return",
+    ):
+        assert row in standard
+    assert "no base-case multiple expansion" in standard
+    for benchmark in (
+        "Nifty Smallcap 250 TRI",
+        "Nifty 200 TRI",
+        "Nifty 50 TRI",
+        "Indian ten-year government securities",
+        "Indian CPI",
+    ):
+        assert benchmark in standard
+    assert "quantified required excess return" in standard
+    assert "whether the base case clears it" in standard
+
+
+def test_liquidity_is_measured_classified_and_gated() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    for metric in (
+        "free-float market capitalization",
+        "median daily traded value and volume",
+        "bid-ask spread",
+        "low-volume-day frequency",
+        "circuit-limit frequency",
+        "estimated entry/exit days",
+        "stress-period liquidity",
+    ):
+        assert metric in standard
+    for classification in ("Strong", "Adequate", "Limited", "Poor", "Unacceptable"):
+        assert classification in standard
+    assert "0.5%, 1% and 2% of free-float" in standard
+    assert "Poor and Unacceptable cannot be final selections" in standard
+
+
+def test_bear_opportunity_cost_and_ordered_gates_are_explicit() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    for bear_item in (
+        "Most optimistic assumption",
+        "Weakest moat claim",
+        "Governance, regulatory and liquidity risks",
+        "Historical analogue",
+        "Evidence that would invalidate the bear case",
+    ):
+        assert bear_item in standard
+    for comparator in (
+        "closest rejected alternative",
+        "strongest industry competitor",
+        "different economic model",
+        "diversified index",
+    ):
+        assert comparator in standard
+    gates = [
+        "1. Data sufficiency",
+        "2. Governance",
+        "3. Liquidity",
+        "4. Business-quality threshold",
+        "5. Reinvestment-runway threshold",
+        "6. Permanent-capital-loss assessment",
+        "7. Normalized valuation",
+        "8. Bear-case downside",
+        "9. Base expected return",
+        "10. Benchmark-relative expected return",
+        "11. Evidence confidence",
+        "12. Portfolio concentration and correlation",
+    ]
+    assert all(gate in standard for gate in gates)
+    assert "earliest failed gate as the controlling failed gate" in standard
+    assert "Not selected — concentration/correlation" in standard
+
+
+def test_gate_thresholds_are_precommitted_and_structural_failures_are_not_price_cured() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    for threshold in (
+        "Data sufficiency passes only for Complete or Mostly Complete",
+        "Business quality passes at 75/100 or above",
+        "Reinvestment runway passes at 12/20 or above",
+        "two-year operating downturn",
+        "precommitted permanent-loss tolerance",
+        "Base expected return must be positive in real terms",
+        "Moderate-High or High",
+        "precommitted mandate limits",
+    ):
+        assert threshold in standard
+    assert "do not relax them after seeing company names or results" in standard
+    assert "Not applicable — no price cures this gate" in standard
+
+
+def test_false_negative_report_rule_handles_small_universes() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    assert (
+        "five strongest false-negative challenges, or all excluded companies when "
+        "fewer than five exist"
+    ) in standard
+
+
+def test_zero_selection_calibration_confidence_and_final_principle() -> None:
+    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
+    assert "three, fewer than three, or zero companies" in standard
+    for calibration in (
+        "only in crashes",
+        "systematically rejects compounders",
+        "unrealistically low terminal multiples",
+        "excessive hurdle",
+        "favours mature cash generators",
+        "over-penalizes small-cap uncertainty",
+        "positive selections in normal markets",
+    ):
+        assert calibration in standard
+    for confidence in ("High", "Moderate-High", "Moderate", "Low", "Insufficient Evidence"):
+        assert confidence in standard
+    assert "Do not optimize for producing an impressive answer" in standard
+    assert "At the current price, does this company offer a" in standard
+
+
+def test_report_contract_has_a_to_j_and_twenty_five_qc_items() -> None:
+    headings = (
+        "A. Executive Decision Summary",
+        "B. Candidate Funnel",
+        "C. Complete Comparative Matrix",
+        "D. Primary-Source Evidence Map",
+        "E. Governance and Capital-Allocation Matrix",
+        "F. Expected-Return Models",
+        "G. False-Negative Challenge",
+        "H. Final Candidates",
+        "I. Rejected Finalists",
+        "J. Final Conclusion",
+    )
+    for heading in headings:
+        assert heading in INVESTMENT_GRADE_SELECTION_STANDARD
+        assert f"# {heading}" in REPORT_AGENT_PROMPT
+    assert INVESTMENT_GRADE_SELECTION_STANDARD.count("\n25.") == 1
+    assert "Incomplete for investment-decision reliance." in REPORT_AGENT_PROMPT
+
+
+def test_policy_is_shared_by_every_agent_role() -> None:
     marker = "# Long-Horizon Indian Equity Research Policy"
-
     assert marker in LONG_HORIZON_RESEARCH_POLICY
     for prompt in (
         MIDAS_PRIMARY_SYSTEM_PROMPT,
@@ -79,91 +376,35 @@ def test_long_horizon_policy_is_shared_by_every_agent_role() -> None:
     ):
         assert marker in prompt
         assert "seven to ten years" in prompt
-        assert "Question 3 must never overwrite Questions 1 and 2" in prompt
+        assert "Current Valuation" in prompt
+        assert "Liquidity" in prompt
 
 
-def test_policy_preserves_expensive_quality_and_missing_data() -> None:
-    policy = " ".join(LONG_HORIZON_RESEARCH_POLICY.split())
-    assert "remains highly ranked for quality" in LONG_HORIZON_RESEARCH_POLICY
-    assert "High-quality valuation watchlist" in LONG_HORIZON_RESEARCH_POLICY
-    assert "Never reject, eliminate" in LONG_HORIZON_RESEARCH_POLICY
-    assert "Category G:" in LONG_HORIZON_RESEARCH_POLICY
-    assert "do not give it a final rank" in policy
-    assert "Assign every company to exactly one primary category" in (
-        LONG_HORIZON_RESEARCH_POLICY
+def test_progressive_policy_reduces_fixed_prompt_overhead() -> None:
+    prompts = (
+        MIDAS_PRIMARY_SYSTEM_PROMPT,
+        RESEARCH_AGENT_PROMPT,
+        ADVERSARIAL_AGENT_PROMPT,
+        DEEP_RESEARCH_AGENT_PROMPT,
+        REPORT_AGENT_PROMPT,
     )
-    assert "Select fewer than three companies, or none" in policy
+    optimized_characters = sum(map(len, prompts))
+    repeated_full_policy_floor = len(LONG_HORIZON_RESEARCH_POLICY) * len(prompts)
+
+    assert optimized_characters < repeated_full_policy_floor * 0.20
+    assert "research_policy" in "\n".join(prompts)
 
 
-def test_policy_blocks_short_term_score_leakage_and_false_diversification() -> None:
-    policy = " ".join(LONG_HORIZON_RESEARCH_POLICY.split())
-
-    assert "cannot materially increase Business Quality" in policy
-    assert "Replace “Why now?”" in policy
-    assert "do not call two lenders diversified" in policy
-    assert "select at most one company from a narrow industry" in policy
-    assert "rankings would remain broadly similar if the next result date were unknown" in (
-        LONG_HORIZON_RESEARCH_POLICY
-    )
-
-
-def test_report_prompt_requires_the_long_horizon_output_contract() -> None:
-    prompt = " ".join(REPORT_AGENT_PROMPT.split())
-    for heading in (
-        "A. Investment decision summary",
-        "B. Candidate funnel",
-        "C. Full finalist comparison",
-        "D. Final selections",
-        "E. Rejected finalists",
-        "F. Final conclusion",
-    ):
-        assert heading in prompt
-    assert "`10_final_report.md`" in prompt
-    assert "zero to three selections" in prompt
-    assert "fifteen-question quality-control" in prompt
-
-
-def test_investment_grade_standard_has_current_price_and_primary_source_gates() -> None:
-    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
-
-    assert "exact time, and timezone" in standard
-    assert "Stale price data prohibit" in standard
-    assert "shares outstanding" in standard
-    assert "material announcements through the cut-off" in standard
-    assert "Secondary sites" in standard
-    assert "cannot be the sole support for decisive" in standard
-    assert "Internal research artifacts are not independent evidence" in standard
-
-
-def test_investment_grade_standard_requires_equal_depth_models_and_governance() -> None:
-    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
-
-    assert "eight to ten strongest business-quality candidates" in standard
-    assert "same minimum deep-dive for every one" in standard
-    assert "at least the previous ten years" in standard
-    assert (
-        "Strong, Acceptable, Material concern, Unacceptable, or Insufficient evidence"
-        in standard
-    )
-    assert "at least two appropriate valuation methods" in standard
-    assert "seven-to-ten-year bear, base, and bull annualized" in standard
-    assert "Do not assume base-case multiple expansion" in standard
-    assert "at least three relevant peers where possible" in standard
-
-
-def test_investment_grade_standard_requires_alternatives_bears_and_conditional_selection() -> None:
-    standard = " ".join(INVESTMENT_GRADE_SELECTION_STANDARD.split())
-
-    assert "Nifty 50 TRI" in standard
-    assert "Indian ten-year government-security yield" in standard
-    assert "assign an independent bear analyst" in standard
-    assert "strongest reason to own the index" in standard
-    assert "Advance as high-conviction candidate" in standard
-    assert "Select fewer than three companies, or none" in standard
-    assert "unquestionable, certain, guaranteed, objectively proven" in standard
-    assert "fewer than three companies currently meet the required quality" in standard
-    assert "no company in the current universe offers a sufficiently attractive" in standard
-    assert "all fifteen questions" in standard
+def test_adversarial_and_deep_research_roles_enforce_new_contract() -> None:
+    adversarial = " ".join(ADVERSARIAL_AGENT_PROMPT.split())
+    deep = " ".join(DEEP_RESEARCH_AGENT_PROMPT.split())
+    assert "Do not search the run directory for primary research" in adversarial
+    assert "five strongest excluded companies" in adversarial
+    assert "including expensive high-quality names" in adversarial
+    assert "every explicitly assigned evidence-qualified company" in deep
+    assert "same minimum depth" in deep
+    assert "do not narrow or broaden" in deep
+    assert "two-method valuation" in deep
 
 
 def test_report_role_declares_exactly_one_tool() -> None:
@@ -175,7 +416,7 @@ def test_research_tool_names_are_unique() -> None:
     assert len(names) == len(set(names))
 
 
-def test_research_and_adversarial_roles_receive_the_primary_research_tools() -> None:
+def test_research_roles_receive_expected_tools_and_guidance() -> None:
     from midas.deepagents.deepagent import MIDAS_TOOL_GUIDANCE, build_subagents
 
     by_name = {spec["name"]: spec for spec in build_subagents()}
@@ -183,27 +424,13 @@ def test_research_and_adversarial_roles_receive_the_primary_research_tools() -> 
     assert by_name["research-agent"]["tools"] is MIDAS_TOOLS
     assert by_name["adversarial-agent"]["tools"] is MIDAS_TOOLS
     assert by_name["deep-research-agent"]["tools"] is MIDAS_TOOLS
-    report_runnable = by_name["report-agent"]["runnable"]
-    report_tool_node = report_runnable.nodes["tools"].bound
+    report_tool_node = by_name["report-agent"]["runnable"].nodes["tools"].bound
     assert "generate_report" in report_tool_node.tools_by_name
     assert {"read_file", "write_file"}.issubset(report_tool_node.tools_by_name)
-    assert "Run all scraping and market-data tools sequentially, never in parallel" in (
-        MIDAS_TOOL_GUIDANCE
-    )
+    assert "Run all scraping and market-data tools sequentially" in MIDAS_TOOL_GUIDANCE
     assert "Only web_research calls are exempt" in MIDAS_TOOL_GUIDANCE
-    assert "must never increase the Long-Term" in MIDAS_TOOL_GUIDANCE
-    assert "classify missing evidence as Insufficient Evidence" in MIDAS_TOOL_GUIDANCE
-    assert "never force three final selections" in MIDAS_TOOL_GUIDANCE
-
-
-def test_deep_research_role_is_equal_depth_and_runs_before_final_selection() -> None:
-    prompt = " ".join(DEEP_RESEARCH_AGENT_PROMPT.split())
-
-    assert "eight to ten explicitly assigned companies" in prompt
-    assert "same minimum depth" in prompt
-    assert "do not narrow or broaden the shortlist" in prompt
-    assert "two-method valuation" in prompt
-    assert "Write only `07_equal_depth_deep_research.md`" in DEEP_RESEARCH_AGENT_PROMPT
+    assert "median traded value/volume" in MIDAS_TOOL_GUIDANCE
+    assert "government-security benchmark" in MIDAS_TOOL_GUIDANCE
 
 
 def test_deep_research_role_uses_its_dedicated_model_factory(monkeypatch) -> None:

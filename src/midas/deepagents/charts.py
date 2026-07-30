@@ -16,6 +16,8 @@ from langchain_core.tools import tool
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field, field_validator
 
+from .workspace import agent_output_directory, has_isolated_agent_output_directory
+
 CHART_WIDTH = 1200
 CHART_HEIGHT = 750
 TITLE_HEIGHT = 56
@@ -804,10 +806,15 @@ def _slugify(value: str) -> str:
 
 
 def _unique_path(stem: str) -> Path:
+    charts_dir = (
+        agent_output_directory() / "charts"
+        if has_isolated_agent_output_directory()
+        else CHARTS_DIR
+    )
     base = _slugify(stem)
     for index in range(1, 1000):
         suffix = "" if index == 1 else f"-{index}"
-        path = CHARTS_DIR / f"{base}{suffix}.png"
+        path = charts_dir / f"{base}{suffix}.png"
         if not path.exists():
             return path
     raise RuntimeError("unable to allocate a unique chart filename")
@@ -817,13 +824,13 @@ def _save_chart_png(
     title: str, png: bytes, *, chart_kind: str, filename: str | None, detail: str
 ) -> str:
     with _SAVE_LOCK:
-        CHARTS_DIR.mkdir(parents=True, exist_ok=True)
         path = _unique_path(filename or title)
+        path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_bytes(png)
         temporary.replace(path)
     try:
-        relative_path = path.resolve().relative_to(Path.cwd().resolve())
+        relative_path = path.resolve().relative_to(agent_output_directory())
         markdown_path = relative_path.as_posix()
     except ValueError:
         markdown_path = path.resolve().as_uri()
