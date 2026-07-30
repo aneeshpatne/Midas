@@ -1,250 +1,309 @@
+<div align="center">
+
 # Midas
 
-Midas searches the web, renders pages with Camoufox, extracts clean main-page text
-locally, then compresses that scraped corpus with an Ollama model
-(`gpt-oss:120b-cloud` by default) via ChatOpenAI's OpenAI-compatible client.
+**Long-horizon Indian equity research with an auditable paper trail**
 
-The model only compresses what was scraped. It is not asked to research beyond those
-pages. Full cleaned page text remains available on each successful source.
+Midas turns a sector, NSE index, company, or research question into staged multi-agent diligence: primary screening, adversarial challenge, equal-depth deep research, and a validated decision report with Markdown, HTML, and PDF outputs.
 
-## Setup
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-0.1.0-informational)](./pyproject.toml)
+[![UI](https://img.shields.io/badge/UI-Textual-purple)](https://textual.textualize.io/)
+[![Agents](https://img.shields.io/badge/agents-DeepAgents-0A66C2)](https://github.com/langchain-ai/deepagents)
+[![Package manager](https://img.shields.io/badge/uv-ready-de5fe9?logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green)](./LICENSE)
+
+</div>
+
+---
+
+## Overview
+
+Midas accepts an equity-research prompt—typically an Indian sector, NSE index, company, or event—and runs a staged research workflow. Primary and adversarial agents screen the full universe, equal-depth diligence is applied to every admitted name, and the lead analyst produces an investment-committee decision that may select zero to three candidates. The user receives numbered Markdown research artifacts plus a compiled A–J decision report (`10_final_report.md`, HTML, and PDF). Outputs are evidence-dated research assessments with source ledgers, scoring support, and explicit uncertainty—not personalized buy/sell recommendations.
+
+The interactive surface is a [Textual](https://textual.textualize.io/) terminal UI with streaming agent activity, session resume, and Markdown artifact preview. The same agent stack is available as a one-shot CLI (`midas`) and as a Python library. Supporting systems include DuckDuckGo search with Camoufox page rendering, Screener and signals provider scrapers, NSE/market-data adapters, optional Redis tool caching, and Ollama-backed compression for scraped text and concall transcripts. Research runs write durable artifacts under `output/`; TUI sessions isolate each agent workspace and store conversation history in SQLite.
+
+## Features
+
+| Area | What the project provides |
+| --- | --- |
+| **Staged research desk** | Lead analyst plus `research-agent`, `adversarial-agent`, `deep-research-agent`, and `report-agent` roles that produce a fixed sequence of research artifacts from mandate through investment-committee decision. |
+| **Long-horizon decision standard** | Seven-to-ten-year owner-style analysis that separates business quality, valuation, evidence confidence, governance, and liquidity; zero to three final selections; incomplete work is labeled rather than forced. |
+| **Indian market evidence tools** | Screener fundamentals/statements/peers/charts/concalls, signals provider consensus/SWOT/superstars/ASM-GSM/FII-DII, NSE constituents and filings, quotes, trading history, market scans, event calendars, deals, derivatives snapshots, institutional flows, and Nifty/MCX context. |
+| **Grounded web research** | Search → Camoufox/HTTP scrape → local main-text extraction → Ollama compression of scraped corpus only, with full cleaned text retained on successful sources. |
+| **Artifact-backed reporting** | Ten required Markdown research files, validated A–J final report structure, HTML compilation, and Chromium-based PDF generation via `generate_report`. |
+| **Interactive TUI** | Codex-style terminal session with live agent highlighting, tool activity, todos, token usage, Markdown file tree/preview, `/new` / `/sessions` / `/resume`, and cancel-on-idle controls. |
+| **Library scrapers** | Synchronous and async public APIs for company scrape (`scrape_company*`), signals provider signals (`scrape_signals*`), and web search (`web_search` / `search_and_scrape`) returning frozen Pydantic models. |
+| **Resilience and isolation** | Per-source single-flight tool gates, sequential scrape/market-data policy, fail-open Redis cache for successful tool results, and per-session filesystem workspaces under `output/<session-id>/`. |
+| **Chart artifacts** | Agent tools for bar, line, area, pie, stacked-bar, scatter, and heatmap PNGs written under `output/charts/` with embed paths returned to the model. |
+
+> [!NOTE]
+> **Implemented:** staged multi-agent workflow, CLI and Textual TUI, research tool suite, Screener/signals provider scrapers, web search pipeline, chart tools, session store, and report validation/PDF rendering.
+>
+> **Optional / environment-dependent:** Redis tool cache (`MIDAS_REDIS_URL` / `REDIS_URL`), `twitter_search` via local `grok` CLI (two calls per agent instance), Camoufox browser smoke tests (`MIDAS_RUN_INTEGRATION=1`), and Chromium/Chrome for PDF export (`REPORT_PDF_BROWSER`).
+>
+> **Present but not wired into the main tool list:** `get_image_model()` (OpenAI vision helper documented for a `search_image` flow) is defined in `model.py` and is not registered among `MIDAS_TOOLS`.
+>
+> **Product boundary:** conclusions are research assessments for a stated analysis cut-off. They are not brokerage execution, portfolio accounting, or personalized investment advice.
+
+## From prompt to decision report
+
+```mermaid
+flowchart LR
+  A[User prompt] --> B[Lead analyst]
+  B --> C[00 Mandate]
+  C --> D[01 Universe]
+  D --> E[Research agent]
+  E --> F[02–03 Primary screen]
+  F --> G[Adversarial agent]
+  G --> H[04 Blind + 05 Red team]
+  H --> I[Lead: 06 Deep-dive set]
+  I --> J[Deep-research agent]
+  J --> K[07 Equal-depth]
+  K --> L[Adversarial: 08 Bear cases]
+  L --> M[Lead: 09 IC decision]
+  M --> N[Report agent]
+  N --> O[10 Report + PDF]
+```
+
+Stages run sequentially because upstream data tools are single-flight per source (Screener, signals provider, NSE, web, X). Scraping and market-data tools are intended to run one at a time; only `web_research` is exempt from that cross-tool sequencing rule. Successful expensive tool responses can be cached in Redis for 24 hours; errors are never cached, and Redis failures fall back to uncached execution. CLI runs land under `output/research/<topic>/<timestamp>/`; TUI runs land under `output/<session-id>/research/<topic>/<timestamp>/`.
+
+## Research information architecture
+
+```mermaid
+flowchart TD
+  R[Research run directory]
+  R --> M[Mandate and universe]
+  M --> M1[00_mandate.md]
+  M --> M2[01_universe.md]
+  R --> P[Primary screen]
+  P --> P1[02_primary_research.md]
+  P --> P2[03_primary_shortlist.md]
+  R --> A[Adversarial challenge]
+  A --> A1[04_adversary_independent.md]
+  A --> A2[05_adversary_critique.md]
+  R --> D[Equal-depth diligence]
+  D --> D1[06_deep_dive_shortlist.md]
+  D --> D2[07_equal_depth_deep_research.md]
+  R --> C[Committee and publication]
+  C --> C1[08_finalist_bear_cases.md]
+  C --> C2[09_investment_committee_decision.md]
+  C --> C3[10_final_report.md / .html / PDF]
+```
+
+The final report is constrained to sections **A–J**: Executive Decision Summary, Candidate Funnel, Complete Comparative Matrix, Primary-Source Evidence Map, Governance and Capital-Allocation Matrix, Expected-Return Models, False-Negative Challenge, Final Candidates, Rejected Finalists, and Final Conclusion.
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph presentation [Application]
+    CLI[midas CLI]
+    TUI[midas-tui Textual app]
+    LIB[Public Python API]
+  end
+
+  subgraph agents [Agent layer]
+    LEAD[midas-lead-analyst]
+    SUB[research / adversarial / deep-research / report]
+    FS[FilesystemBackend workspace]
+  end
+
+  subgraph domain [Domain and tools]
+    TOOLS[MIDAS_TOOLS + chart tools]
+    PIPE[Web search pipeline]
+    SCR[Screener scraper]
+    TL[signals provider scraper]
+    MD[market_data adapters]
+    REP[generate_report]
+    SESS[SessionStore SQLite]
+  end
+
+  subgraph external [External systems]
+    DDGS[DuckDuckGo search]
+    CAM[Camoufox / HTTP scrape]
+    OLL[Ollama compression]
+    DS[DeepSeek models]
+    NSE[NSE and market providers]
+    WEB[Screener / signals provider / web]
+    REDIS[(Optional Redis)]
+    CHROME[Chrome or Chromium]
+  end
+
+  CLI --> LEAD
+  TUI --> LEAD
+  TUI --> SESS
+  LIB --> PIPE
+  LIB --> SCR
+  LIB --> TL
+  LEAD --> SUB
+  LEAD --> TOOLS
+  LEAD --> FS
+  SUB --> TOOLS
+  SUB --> FS
+  TOOLS --> PIPE
+  TOOLS --> SCR
+  TOOLS --> TL
+  TOOLS --> MD
+  TOOLS --> REDIS
+  PIPE --> DDGS
+  PIPE --> CAM
+  PIPE --> OLL
+  SCR --> WEB
+  TL --> WEB
+  MD --> NSE
+  LEAD --> DS
+  SUB --> DS
+  REP --> CHROME
+```
+
+**Conventions that show up in the code:**
+
+- **Agent construction** — `create_midas_agent()` builds a DeepAgents graph with shared `MIDAS_TOOLS`, role-specific system prompts, and a virtual filesystem rooted at the project or `output/<agent_id>/`.
+- **Model split** — lead/research/adversarial use DeepSeek `deepseek-v4-flash`; deep-research and report writing use `deepseek-v4-pro`. Scraped-text and concall compression use a local OpenAI-compatible Ollama endpoint (`gpt-oss:120b-cloud` by default).
+- **Tool contracts** — successful research tools return a bounded summary plus a content-addressed `/tool_results/<result-id>.json` artifact containing the complete normalized evidence. `research_batch` runs up to 100 existing lookups sequentially in one model round trip. Per-source concurrency gates still return `busy` immediately when another call from the same source is active.
+- **Token controls** — detailed scoring/evidence/selection policies are loaded through `research_policy` only when relevant, and DeepAgents compacts growing history at a cost window well below DeepSeek's provider limit. Per-run model/tool-size telemetry is written to `metrics/token_usage.jsonl`.
+- **Artifact contract** — report compilation validates the ten research files, lints A–J headings and table width, embeds local images, and prints PDF through a Chromium-based browser.
+- **Session ownership** — the TUI owns `SessionStore` at interaction boundaries; each turn sets `AGENT_OUTPUT_DIRECTORY` so host-side tools write into the isolated session tree.
+- **Failure handling** — partial scrape failures do not abort web search when at least one page succeeds; missing API keys surface as setup errors rather than silent runs; incomplete tool-call batches in the TUI clear conversation state while leaving generated files intact.
+
+## Tech stack
+
+| Layer | Technology |
+| --- | --- |
+| **Language** | Python 3.12+ |
+| **Packaging** | [uv](https://docs.astral.sh/uv/), `pyproject.toml` project `midas` 0.1.0 |
+| **UI** | [Textual](https://textual.textualize.io/) TUI; Rich markup for transcript rendering |
+| **Agents** | [DeepAgents](https://github.com/langchain-ai/deepagents), LangGraph streaming, LangChain tools |
+| **Models** | [DeepSeek](https://www.deepseek.com/) via `langchain-deepseek`; Ollama via OpenAI-compatible `ChatOpenAI` for compression |
+| **Search and scrape** | [ddgs](https://pypi.org/project/ddgs/), [Camoufox](https://camoufox.com/), httpx, BeautifulSoup/lxml, [trafilatura](https://trafilatura.readthedocs.io/) |
+| **Market data** | fundamentals provider and signals provider HTML scrapers; `nse`, `nselib`, `indian-market-data`, cloudscraper |
+| **Persistence** | Run artifacts on disk; TUI sessions in SQLite (`output/.midas-sessions.sqlite3`); optional Redis tool cache |
+| **Reporting** | Python-Markdown → HTML → Chromium headless PDF |
+| **Charts** | Pillow-generated PNG chart tools |
+| **Testing / lint** | pytest, pytest-asyncio, ruff |
+
+## Project structure
+
+```text
+midas/
+├── pyproject.toml                 # Package metadata, scripts, pytest/ruff config
+├── .env.example                   # Ollama endpoint template
+├── examples/
+│   ├── web_search.py              # Search → scrape → compress demo
+│   ├── scrape_fundamentals.py         # Screener company CLI example
+│   └── scrape_signals.py        # signals provider signals CLI example
+├── src/midas/
+│   ├── cli.py                     # `midas` one-shot research entrypoint
+│   ├── pipeline.py                # Web search, Camoufox scrape, Ollama compress
+│   ├── market_data.py             # Normalized NSE/market provider adapters
+│   ├── sessions.py                # SQLite session store for the TUI
+│   ├── models.py                  # SearchResult / SourceResult contracts
+│   ├── screener/                  # fundamentals provider client, parser, charts, concalls
+│   ├── trendlyne/                 # signals provider free-signal scrapers
+│   ├── tui/
+│   │   ├── app.py                 # Textual application shell
+│   │   └── events.py              # Agent stream → UI event mapping
+│   └── deepagents/
+│       ├── deepagent.py           # Lead agent, subagents, workspace binding
+│       ├── tools.py               # Research tools registered on agents
+│       ├── prompts.py             # Workflow and scoring contracts
+│       ├── reporting.py           # Artifact validation + PDF report tool
+│       ├── charts.py              # Chart generation tools
+│       ├── model.py               # DeepSeek / OpenAI model factories
+│       ├── cache.py               # Fail-open Redis tool cache
+│       └── workspace.py           # Per-invocation output directory context
+├── tests/                         # Unit, workflow, and optional integration tests
+└── output/                        # Local run artifacts and session data (gitignored research paths)
+```
+
+## Requirements
+
+- **OS:** macOS or Linux-class environment with a terminal (Camoufox and Chrome paths are most explicitly supported on macOS defaults; Linux Chrome/Chromium via `PATH` or `REPORT_PDF_BROWSER`).
+- **Python:** 3.12+ (`.python-version` pins `3.12`).
+- **Package manager:** [uv](https://docs.astral.sh/uv/).
+- **Browser automation:** Camoufox browser binary (`uv run python -m camoufox fetch`).
+- **Local LLM server:** [Ollama](https://ollama.com/) for scraped-text / concall compression, with model `gpt-oss:120b-cloud` available by default.
+- **API credentials:**
+  - `DEEPSEEK_API_KEY` — required for the research agents (CLI refuses to start without it).
+  - `OPENAI_API_KEY` — expected by the TUI setup check for a complete environment; also accepted as a fallback credential string for the Ollama OpenAI-compatible client.
+- **PDF rendering:** Google Chrome or Chromium on `PATH`, the default macOS Chrome path, or `REPORT_PDF_BROWSER`.
+- **Network access:** required for search, scrapers, and market-data tools.
+- **Optional:** Redis for tool caching; `grok` CLI on `PATH` for `twitter_search`.
+
+Local development does not require a deployed service. Physical-device or mobile targets are not applicable—this is a terminal and library project. Integration tests that hit the live web need both network access and an installed Camoufox browser.
+
+## Getting started
+
+1. **Clone and enter the repository**
+
+```bash
+git clone <repository-url>
+cd Midas
+```
+
+2. **Install dependencies**
 
 ```bash
 uv sync
 uv run python -m camoufox fetch
+```
+
+3. **Configure environment**
+
+```bash
 cp .env.example .env
 ```
 
-Compression talks to a local Ollama server at `http://localhost:11434/v1`. Make sure
-Ollama is running and the model is available:
+Add at least:
+
+```dotenv
+DEEPSEEK_API_KEY=...
+OPENAI_API_KEY=...          # expected by the TUI setup check
+OLLAMA_BASE_URL=http://localhost:11434/v1
+# OLLAMA_API_KEY=ollama     # optional; ChatOpenAI still needs a non-empty key value
+# MIDAS_REDIS_URL=redis://localhost:6379/0
+# MIDAS_CONTEXT_BUDGET_TOKENS=75000  # cost window; provider capacity is unchanged
+# REPORT_PDF_BROWSER=/path/to/chrome-or-chromium
+```
+
+4. **Start Ollama and pull the compression model**
 
 ```bash
 ollama pull gpt-oss:120b-cloud
 ```
 
-Optional overrides in `.env`:
+5. **Run research**
 
-```dotenv
-OLLAMA_BASE_URL=http://localhost:11434/v1
-# OLLAMA_API_KEY=ollama
-```
-
-## Usage
-
-Run the DeepAgent from the command line:
+One-shot CLI:
 
 ```bash
 uv run midas "Summarize TCS's latest results and concall guidance"
 uv run midas "NIFTY IT"
 ```
 
-The CLI displays a compact status line for each research tool and `send_update`
-research narration as they arrive, then prints the final answer. It needs the same
-model credentials as the configured DeepAgent (`DEEPSEEK_API_KEY` by default); the
-CLI automatically loads a project `.env` file.
-
-For an interactive, Codex-style terminal session, launch the TUI:
+Interactive TUI:
 
 ```bash
 uv run midas-tui
 ```
 
-The TUI keeps conversational context in memory for follow-up questions and streams
-agent text, provider-visible reasoning/status blocks, research updates, tool activity,
-and todos as they happen. The agent panel highlights the lead, research, adversarial,
-or report agent currently producing work. Markdown artifacts created during the
-session appear under `output/research` in the file tree and can be selected for a
-rendered preview.
-
-Controls:
-
-- `Enter` — submit the prompt.
-- `Ctrl+C` — cancel active research, or quit while idle.
-- `Ctrl+N` or `/new` — clear the conversation and start a fresh context.
-- `F2` / `F3` — toggle the agents/todos and files/preview panes.
-- `/quit` — exit.
-
-The input is intentionally locked while a turn is running. TUI context is ephemeral
-and is discarded on exit; generated research artifacts remain on disk. Both
-`DEEPSEEK_API_KEY` and `OPENAI_API_KEY` should be configured for the complete staged
-workflow. If either is missing, the interface still opens and displays a setup error.
-
-For a sector or NSE index, Midas runs a staged seven-to-ten-year,
-current-price investment-research workflow:
-
-1. A primary research agent screens the complete universe and writes its research,
-   then proposes the strongest 8–10 companies for equal-depth diligence.
-2. An adversarial agent builds a blind competing screen, then runs a second pass
-   challenging the primary selection.
-3. A deep-research agent applies the same governance, normalization, valuation,
-   peer, scenario, and expected-return work to every shortlisted company.
-4. The adversarial agent writes independent bear cases, after which the lead makes an
-   auditable investment-committee decision that may select zero to three candidates.
-5. A publication-only agent calls its single `generate_report` tool to compile the
-   completed Markdown set into `final_report.pdf` with Tectonic.
-
-Each run is saved under `output/research/<topic>/<timestamp>/`. Conclusions are
-evidence-dated research assessments, not personalized investment advice or buy/sell
-recommendations.
-
-Call the whole pipeline with one helper:
+Library usage:
 
 ```python
-from midas import web_search
+from midas import web_search, scrape_company_sync, scrape_signals_sync
 
-result = web_search(
-    "Recent developments in sodium-ion batteries",
-    max_results=5,
-)
-print(result.compressed)  # AI compression of scraped pages only
-for source in result.sources:
-    print(source.source_id, source.status, source.url)
-    if source.content:
-        print(source.content[:200])
+result = web_search("Recent developments in sodium-ion batteries", max_results=5)
+print(result.compressed)
+
+company = scrape_company_sync("RELIANCE", include_chart=True, include_concalls=True)
+print(company.agent_brief())
+
+signals = scrape_signals_sync("TCS")
+print(signals.agent_brief())
 ```
 
-Or from the command line:
-
-```bash
-uv run python examples/web_search.py "Recent developments in sodium-ion batteries"
-uv run python examples/web_search.py "query" --max-results 3
-```
-
-In async code:
-
-```python
-from midas import search_and_scrape
-
-result = await search_and_scrape("Recent developments in sodium-ion batteries")
-```
-
-The result is a frozen Pydantic model with the query, compressed text, and source
-records. Successful sources include full cleaned `content`; failed pages include an
-`error`. A failed page does not abort the pipeline when at least one other page succeeds.
-
-## fundamentals provider company scraper
-
-Midas also ships a structured scraper for
-[`https://www.fundamentals provider/company/{symbol}/`](https://www.fundamentals provider/):
-
-```python
-from midas import scrape_company_sync
-
-result = scrape_company_sync(
-    "RELIANCE",
-    include_chart=True,
-    include_concalls=True,  # download latest transcript PDFs + Ollama summary
-)
-print(result.summary())
-print(result.page.chart_insights.bullets)  # agent-friendly chart stats
-print(result.page.concall_transcripts[0].summary)
-print(result.agent_brief())                # markdown for an LLM
-# or: result.agent_payload()               # compact JSON (no daily ticks)
-```
-
-CLI:
-
-```bash
-uv run python examples/scrape_fundamentals.py RELIANCE
-uv run python examples/scrape_fundamentals.py TCS --chart             # + chart insights
-uv run python examples/scrape_fundamentals.py TCS --concalls          # + transcript PDFs
-uv run python examples/scrape_fundamentals.py TCS --concalls --no-concall-summary  # extract only
-uv run python examples/scrape_fundamentals.py TCS --agent             # brief + chart + concalls
-uv run python examples/scrape_fundamentals.py TCS --agent-json tcs_agent.json
-uv run python examples/scrape_fundamentals.py TCS --consolidated --both --json tcs.json
-uv run python examples/scrape_fundamentals.py --search "tata motors"
-```
-
-It extracts profile/ratios, pros & cons, sector path, quarterly + annual statements,
-balance sheet, cash flow, ratios, growth CAGRs, shareholding, peers, announcements,
-annual reports, credit ratings, and concall **links**. With `--chart` /
-`include_chart=True`, it also pulls Price / 50-DMA / 200-DMA / Volume and derives
-returns, drawdown, DMA regime, and volume stats for agents. With `--concalls` /
-`include_concalls=True`, it downloads the latest transcript PDFs, extracts text, and
-summarizes them with the same Ollama model used by web search (guidance, margins,
-capex, risks, Q&A). Be polite with request volume.
-
-## signals provider high-impact signals
-
-Midas also scrapes **free, high-impact** pages on
-[`signals provider`](https://signals provider/) that complement Screener (not a
-fundamentals replacement):
-
-- analyst consensus headline (target / upside / analyst count)
-- SWOT rule-based strengths, weaknesses, opportunities, threats
-- superstar (ace investor) holdings and recent buys/sells
-- ASM/GSM surveillance risk flag
-- FII/DII cash-segment snapshot
-
-```python
-from midas import scrape_signals_sync
-
-result = scrape_signals_sync("TCS")
-print(result.agent_brief())
-print(result.agent_payload()["swot"])
-```
-
-CLI:
-
-```bash
-uv run python examples/scrape_signals.py TCS
-uv run python examples/scrape_signals.py TCS --agent
-uv run python examples/scrape_signals.py TITAN --json
-uv run python examples/scrape_signals.py --superstars
-uv run python examples/scrape_signals.py --asm
-uv run python examples/scrape_signals.py --fii-dii
-```
-
-Be polite with request volume. Prefer Screener for statements/peers/concalls;
-use signals provider for the signal layer above.
-
-## DeepAgent tools
-
-Expensive research tool results can be shared across runs through Redis. Set
-`MIDAS_REDIS_URL` (or `REDIS_URL`) to a Redis connection URL such as
-`redis://localhost:6379/0`. Successful scrape and market-data responses are cached
-for 24 hours; errors are never cached, and Redis failures fall back to uncached
-execution.
-
-`midas.deepagents.deepagent.agent` automatically registers twenty-four tools:
-
-- `send_update` — emits a conversational, real-time research update through the
-  agent's custom stream.
-- `web_research` — grounded web search, scrape, and summary with source URLs.
-- `company_fundamentals` — normal Screener fundamentals, statements, peers, and chart data.
-- `earnings_transcripts` — a separate transcript tool for management guidance, margins,
-  capex, risks, and Q&A.
-- `market_signals` — consensus, SWOT, superstars, ASM/GSM, FII/DII.
-- `nse_list_index` — live constituents for Nifty and special NSE equity lists.
-- `nse_company_filings` — NSE announcements, actions, board meetings, results,
-  shareholding, and annual-report links.
-- `nse_equity_snapshot` — live NSE quote, volume, delivery, price-band, 52-week,
-  security-status, and identity context.
-- `equity_trading_history` — bounded price, volatility, drawdown, volume, and
-  delivery-trend analysis.
-- `nse_market_scan` — index breadth, gainers, losers, volume gainers, active
-  equities, and India VIX.
-- `equity_event_calendar` — market-wide or symbol-filtered results and corporate
-  event discovery.
-- `exchange_deals` — bulk deals, block deals, and reported short-selling activity.
-- `nse_derivatives_snapshot` — bounded option-chain positioning, PCR, max pain,
-  major OI strikes, lot size, and F&O-ban status.
-- `institutional_activity` — latest or dated FII/DII, NSDL FPI, and derivatives reports.
-- `india_market_context` — compact Nifty price/TRI and MCX commodity performance.
-- `twitter_search` — latest public X/Twitter discussion through the local Grok CLI,
-  capped at two calls per agent instance.
-- `generate_bar_chart` / `generate_horizontal_bar_chart` — static PNG bar charts.
-- `generate_line_chart` / `generate_area_chart` — single- or multi-series trend charts.
-- `generate_pie_chart` — non-negative labelled-share charts.
-- `generate_stacked_bar_chart` — multi-series composition by category.
-- `generate_scatter_chart` — labelled x/y observation plots.
-- `generate_heatmap_chart` — numeric row/column matrix visualizations.
-
-Chart artifacts are written to `output/charts/` and the tools return JSON containing
-the absolute path, relative path, Markdown embed, and a note that the values are
-rendered as supplied rather than independently verified.
-
-Set `DEEPSEEK_API_KEY` before importing the configured agent, then invoke it as usual:
+Agent entrypoint:
 
 ```python
 from midas.deepagents.deepagent import agent
@@ -254,31 +313,55 @@ answer = await agent.ainvoke(
 )
 ```
 
-To render progress updates as they happen, stream the agent with the `custom` mode
-and handle chunks whose `type` is `deep_agent_update`:
+> [!IMPORTANT]
+> Do not commit real API keys. `.env` is gitignored. Replace any local development credentials before sharing the environment. Scrapers should be used with polite request volume against third-party sites.
 
-```python
-async for mode, chunk in agent.astream(
-    {"messages": [("user", "Research TCS")],},
-    stream_mode=["updates", "custom"],
-):
-    if mode == "custom" and chunk["type"] == "deep_agent_update":
-        print(chunk["update"])
-```
+### TUI controls
 
-`twitter_search` requires the `grok` CLI on `PATH`; unavailable CLI, timeout, and
-non-zero exit failures are returned to the agent as structured errors.
+| Input | Action |
+| --- | --- |
+| `Enter` | Submit the prompt |
+| `Ctrl+C` | Cancel active research, or quit while idle |
+| `Ctrl+N` or `/new` | Save the current session and start a fresh context |
+| `/sessions` | List recent resumable session IDs |
+| `/resume [session-id]` | Resume a saved session (previous session if ID omitted) |
+| `F2` / `F3` | Toggle agents/todos and files/preview panes |
+| `/exit` or `/quit` | Save and exit |
 
-## Development
+Session metadata and conversation history are stored in `output/.midas-sessions.sqlite3`. Each agent sees only its isolated `output/<session-id>/` tree.
+
+## Running tests
+
+**Package-manager workflow (recommended):**
 
 ```bash
 uv run ruff check .
 uv run pytest
 ```
 
-The optional browser smoke test requires an installed Camoufox browser and network
-access:
+**Integration smoke tests** (network + Camoufox required):
 
 ```bash
 MIDAS_RUN_INTEGRATION=1 uv run pytest -m integration
 ```
+
+The suite covers pipeline models and cleaning, Screener/signals provider parsers and scrapers, market-data adapters, DeepAgent tools/cache/charts/workflow contracts, reporting validation, CLI behavior, session storage, and TUI event/app wiring. Integration tests are opt-in so default CI-style runs stay offline.
+
+## Roadmap
+
+- Wire or remove the unused OpenAI vision helper (`get_image_model` / `search_image`) so the TUI’s `OPENAI_API_KEY` requirement matches an actual agent tool path.
+- Expand `.env.example` beyond Ollama to document `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, Redis, chart directory, and PDF browser settings used by the application.
+- Harden long multi-agent runs against provider tool-call batch failures already mitigated in the TUI by clearing incomplete conversation state.
+- Continue equal-depth batching ergonomics for large admitted sets without lowering the fixed research packet.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](./LICENSE).
+
+You may use, modify, and distribute this software under the terms of that license. Redistribution must preserve the copyright notice, license text, and any `NOTICE` file. Modifications must be documented. The license does **not** grant trademark rights in the project name, and contributions are under the same terms unless stated otherwise. This is a plain-language summary only; the full legal text is in [`LICENSE`](./LICENSE).
+
+---
+
+<div align="center">
+  Built with Python, DeepAgents, Textual, and a stubborn preference for source-backed equity research over narrative conviction.
+</div>
