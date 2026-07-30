@@ -72,6 +72,7 @@ async def test_tui_submits_turn_and_reuses_context_thread(tmp_path: Path) -> Non
             ("assistant", "Completed answer."),
             ("user", "What were the main risks?"),
         ]
+        assert fake.calls[1][1]["config"]["configurable"]["thread_id"] == app.thread_id
         assert "Research universe" in str(app.query_one("#todos", Static).render())
         assert prompt.disabled is False
 
@@ -82,7 +83,13 @@ async def test_tui_tracks_and_previews_session_markdown(tmp_path: Path) -> None:
 
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.pause()
-        artifact = tmp_path / "output" / "research" / "nifty-it" / "run" / "00_mandate.md"
+        artifact = (
+            app.session_output_directory
+            / "research"
+            / "nifty-it"
+            / "run"
+            / "00_mandate.md"
+        )
         artifact.parent.mkdir(parents=True)
         artifact.write_text("# Mandate\n\nBalanced horizon.", encoding="utf-8")
         app._refresh_files()
@@ -109,7 +116,36 @@ async def test_new_session_changes_thread_and_clears_files(tmp_path: Path) -> No
 
         assert app.thread_id != old_thread
         assert app._session_files == {}
-        assert app.query_one("#file-tree", Tree).root.label.plain == "output/research"
+        assert app.thread_id in app.query_one("#file-tree", Tree).root.label.plain
+
+
+@pytest.mark.asyncio
+async def test_resume_restores_conversation_and_session_files(tmp_path: Path) -> None:
+    app = MidasApp(agent=_FakeAgent(), workspace=tmp_path)
+
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        original_id = app.thread_id
+        app._conversation = [("user", "NIFTY IT"), ("assistant", "Prior answer")]
+        app._save_session()
+        artifact = (
+            app.session_output_directory
+            / "research"
+            / "nifty-it"
+            / "run"
+            / "00_mandate.md"
+        )
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("# Mandate", encoding="utf-8")
+
+        await app._new_session()
+        await app._resume_session(original_id[:10])
+
+        assert app.thread_id == original_id
+        assert app._conversation[-1] == ("assistant", "Prior answer")
+        assert artifact.resolve() in app._session_files
+        restored_messages = app.query("#transcript Markdown")
+        assert any("Prior answer" in message.source for message in restored_messages)
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ from textual.widgets import Collapsible, Footer, Input, Markdown, Static, Tree
 from textual.widgets.tree import TreeNode
 from textual.worker import Worker
 
+from ..sessions import Session, SessionStore
 from .events import AGENT_LABELS, AgentEvent, EventKind, display_agent, stream_agent_events
 
 _SPLASH_FRAMES = (
@@ -302,8 +303,11 @@ class MidasApp(App[None]):
     def __init__(self, *, agent: Any | None = None, workspace: Path | None = None) -> None:
         super().__init__()
         self.research_agent = agent
+        self._owns_agent = agent is None
         self.workspace = (workspace or Path.cwd()).resolve()
         self.thread_id = uuid.uuid4().hex
+        self._sessions = SessionStore(self.workspace / "output" / ".midas-sessions.sqlite3")
+        self._sessions.create(self.thread_id)
         self._conversation: list[tuple[str, str]] = []
         self._worker: Worker[Any] | None = None
         self._research_running = False
@@ -316,6 +320,11 @@ class MidasApp(App[None]):
         self._reduced_motion = bool(os.getenv("NO_COLOR"))
         self._known_files: dict[Path, int] = self._scan_markdown()
         self._session_files: dict[Path, int] = {}
+
+    @property
+    def session_output_directory(self) -> Path:
+        """Physical directory that is exposed as `/` to the current agent."""
+        return (self.workspace / "output" / self.thread_id).resolve()
 
     def compose(self) -> ComposeResult:
         yield Static("MIDAS  ◇  initializing", id="brand")
@@ -354,7 +363,11 @@ class MidasApp(App[None]):
             if self.research_agent is None:
                 from ..deepagents.deepagent import create_midas_agent
 
-                self.research_agent = await asyncio.to_thread(create_midas_agent)
+                self.research_agent = await asyncio.to_thread(
+                    create_midas_agent,
+                    agent_id=self.thread_id,
+                    workspace=self.workspace,
+                )
             missing = [
                 name for name in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY") if not os.getenv(name)
             ]
@@ -366,7 +379,7 @@ class MidasApp(App[None]):
                 )
             else:
                 await self.query_one(ChatTranscript).add_system(
-                    "Research desk ready. Context is retained until you use /new or exit."
+                    "Research desk ready. Use /new, /resume [session-id], or /exit."
                 )
             self.query_one("#prompt", Input).disabled = False
             self.query_one("#prompt", Input).focus()
@@ -422,11 +435,19 @@ class MidasApp(App[None]):
         if not value or self._research_running:
             return
         event.input.value = ""
-        if value == "/quit":
+        command, _, argument = value.partition(" ")
+        if command in {"/exit", "/quit"}:
+            self._save_session()
             self.exit()
             return
-        if value == "/new":
+        if command == "/new":
             await self._new_session()
+            return
+        if command == "/resume":
+            await self._resume_session(argument)
+            return
+        if command == "/sessions":
+            await self._show_sessions()
             return
         await self.query_one(ChatTranscript).add_user(value)
         self._research_running = True
@@ -439,13 +460,17 @@ class MidasApp(App[None]):
 
     @work(exclusive=True, group="research")
     async def run_research(self, prompt: str) -> None:
+        from ..deepagents.workspace import AGENT_OUTPUT_DIRECTORY
+
         transcript = self.query_one(ChatTranscript)
         root_answers: dict[str, str] = {}
+        workspace_token = AGENT_OUTPUT_DIRECTORY.set(self.session_output_directory)
         try:
             async for event in stream_agent_events(
                 self.research_agent,
                 prompt,
                 history=self._conversation,
+                config={"configurable": {"thread_id": self.thread_id}},
             ):
                 if event.agent:
                     self._active_agent = event.agent
@@ -470,6 +495,7 @@ class MidasApp(App[None]):
                 self._conversation.extend(
                     [("user", prompt), ("assistant", final_answer)]
                 )
+                self._save_session()
             await transcript.add_system("Turn completed.")
             self._update_brand("◆  ready")
         except asyncio.CancelledError:
@@ -478,7 +504,7 @@ class MidasApp(App[None]):
         except Exception as exc:
             if "insufficient tool messages following tool_calls" in str(exc):
                 self._conversation.clear()
-                self.thread_id = uuid.uuid4().hex
+                self._save_session()
                 await transcript.add_system(
                     "The provider rejected an incomplete tool-call batch. Internal "
                     "conversation state was cleared automatically; generated files "
@@ -488,6 +514,7 @@ class MidasApp(App[None]):
             await transcript.add_system(f"Research failed: {exc}", error=True)
             self._update_brand("✕  failed")
         finally:
+            AGENT_OUTPUT_DIRECTORY.reset(workspace_token)
             self._research_running = False
             self._set_active_agent("")
             prompt_input = self.query_one("#prompt", Input)
@@ -515,7 +542,7 @@ class MidasApp(App[None]):
         self.query_one("#todos", Static).update("\n".join(lines))
 
     def _scan_markdown(self) -> dict[Path, int]:
-        root = self.workspace / "output" / "research"
+        root = self.session_output_directory / "research"
         if not root.exists():
             return {}
         files: dict[Path, int] = {}
@@ -544,11 +571,11 @@ class MidasApp(App[None]):
 
     def _rebuild_tree(self, selected_path: Path | None = None) -> None:
         tree = self.query_one("#file-tree", Tree)
-        tree.reset("output/research")
+        tree.reset(f"output/{self.thread_id}/research")
         root = tree.root
         nodes: dict[tuple[str, ...], TreeNode[Any]] = {(): root}
         leaves: dict[Path, TreeNode[Any]] = {}
-        research_root = self.workspace / "output" / "research"
+        research_root = self.session_output_directory / "research"
         for path in sorted(self._session_files):
             try:
                 parts = path.relative_to(research_root).parts
@@ -577,18 +604,98 @@ class MidasApp(App[None]):
         self.query_one("#preview", Markdown).update(content)
 
     async def _new_session(self) -> None:
+        self._save_session()
         self.thread_id = uuid.uuid4().hex
+        self._sessions.create(self.thread_id)
         self._conversation.clear()
         self._turn_output_tokens = 0
         self._total_input_tokens = 0
         self._total_output_tokens = 0
         self._session_files.clear()
+        if self._owns_agent:
+            from ..deepagents.deepagent import create_midas_agent
+
+            self.research_agent = await asyncio.to_thread(
+                create_midas_agent,
+                agent_id=self.thread_id,
+                workspace=self.workspace,
+            )
         self._known_files = self._scan_markdown()
         await self.query_one(ChatTranscript).reset_feed()
-        await self.query_one(ChatTranscript).add_system("New contextual session started.")
+        await self.query_one(ChatTranscript).add_system(
+            f"New session {self.thread_id} started."
+        )
         self._render_todos([])
         self._rebuild_tree()
         self._update_brand("◆  ready")
+
+    def _save_session(self) -> None:
+        self._sessions.save(
+            self.thread_id,
+            self._conversation,
+            input_tokens=self._total_input_tokens,
+            output_tokens=self._total_output_tokens,
+        )
+
+    async def _resume_session(self, requested_id: str) -> None:
+        target: Session | None
+        if requested_id.strip():
+            target = self._sessions.resolve(requested_id)
+        else:
+            recent = self._sessions.recent(exclude=self.thread_id, limit=1)
+            target = recent[0] if recent else None
+        transcript = self.query_one(ChatTranscript)
+        if target is None:
+            await transcript.add_system(
+                "Session not found. Use /sessions to see resumable IDs.", error=True
+            )
+            return
+        if target.session_id == self.thread_id:
+            await transcript.add_system(f"Session {self.thread_id} is already active.")
+            return
+
+        self._save_session()
+        self.thread_id = target.session_id
+        self._conversation = list(target.conversation)
+        self._total_input_tokens = target.input_tokens
+        self._total_output_tokens = target.output_tokens
+        self._turn_output_tokens = 0
+        if self._owns_agent:
+            from ..deepagents.deepagent import create_midas_agent
+
+            self.research_agent = await asyncio.to_thread(
+                create_midas_agent,
+                agent_id=self.thread_id,
+                workspace=self.workspace,
+            )
+        self._known_files = self._scan_markdown()
+        self._session_files = dict(self._known_files)
+        await transcript.reset_feed()
+        for index, (role, content) in enumerate(self._conversation):
+            if role == "user":
+                await transcript.add_user(content)
+            elif role == "assistant":
+                await transcript.append_text(
+                    AgentEvent(
+                        EventKind.TEXT,
+                        "midas-lead-analyst",
+                        content,
+                        f"restored-{index}",
+                    )
+                )
+        await transcript.add_system(f"Resumed session {self.thread_id}.")
+        self._render_todos([])
+        self._rebuild_tree()
+        self._update_brand("◆  resumed")
+
+    async def _show_sessions(self) -> None:
+        sessions = self._sessions.recent(limit=10)
+        lines = ["Recent sessions:"]
+        for session in sessions:
+            marker = "*" if session.session_id == self.thread_id else " "
+            title = session.title or "(empty session)"
+            lines.append(f"{marker} {session.session_id}  {title}")
+        await self.query_one(ChatTranscript).add_system("\n".join(lines))
 
     def action_new_session(self) -> None:
         if not self._research_running:
@@ -598,6 +705,7 @@ class MidasApp(App[None]):
         if self._research_running and self._worker is not None:
             self._worker.cancel()
         else:
+            self._save_session()
             self.exit()
 
     def action_toggle_sidebar(self) -> None:
