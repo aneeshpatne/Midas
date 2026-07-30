@@ -7,6 +7,9 @@ import inspect
 import json
 import logging
 import os
+import threading
+import time
+from collections import OrderedDict
 from collections.abc import Callable
 from enum import Enum
 from functools import wraps
@@ -19,12 +22,15 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 DEFAULT_TOOL_CACHE_TTL_SECONDS = 24 * 60 * 60
-_CACHE_VERSION = "v1"
+_CACHE_VERSION = "v2"
 
 cache_log = logging.getLogger(__name__)
 _redis_client: Redis | None = None
 _redis_url: str | None = None
 _redis_unavailable = False
+_MEMORY_CACHE_MAX_ENTRIES = 256
+_memory_cache: OrderedDict[str, tuple[float, str, dict[str, str]]] = OrderedDict()
+_memory_cache_lock = threading.Lock()
 
 
 def _configured_redis_url() -> str | None:
@@ -83,7 +89,21 @@ def _cache_key(tool_name: str, arguments: dict[str, Any]) -> str:
 def _bound_arguments(function: Callable[..., Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
     bound = inspect.signature(function).bind(*args, **kwargs)
     bound.apply_defaults()
-    return dict(bound.arguments)
+    normalized: dict[str, Any] = {}
+    for name, value in bound.arguments.items():
+        if isinstance(value, str):
+            value = " ".join(value.split())
+            if name in {"symbol", "index"}:
+                value = value.upper()
+        elif isinstance(value, list):
+            canonical_items = [_jsonable(item) for item in value]
+            serialized_items = (
+                json.dumps(item, sort_keys=True, default=str) for item in canonical_items
+            )
+            value = list(dict.fromkeys(serialized_items))
+            value = [json.loads(item) for item in value]
+        normalized[name] = value
+    return normalized
 
 
 def _is_cacheable_result(result: Any) -> bool:
@@ -99,12 +119,38 @@ def _is_cacheable_result(result: Any) -> bool:
 
 def _read(key: str) -> str | None:
     global _redis_unavailable
+    with _memory_cache_lock:
+        memory = _memory_cache.get(key)
+        if memory is not None:
+            expires_at, value, artifacts = memory
+            if expires_at > time.monotonic():
+                _memory_cache.move_to_end(key)
+                from .artifacts import mark_cache_hit, materialize_cached_artifacts
+
+                materialize_cached_artifacts(artifacts)
+                return mark_cache_hit(value)
+            _memory_cache.pop(key, None)
+
     client = _get_redis_client()
     if client is None:
         return None
     try:
         value = client.get(key)
-        return value if isinstance(value, str) else None
+        if not isinstance(value, str):
+            return None
+        artifact_value = client.get(f"{key}:artifacts")
+        if isinstance(artifact_value, str):
+            try:
+                artifacts = json.loads(artifact_value)
+                if isinstance(artifacts, dict):
+                    from .artifacts import materialize_cached_artifacts
+
+                    materialize_cached_artifacts(artifacts)
+            except (OSError, TypeError, json.JSONDecodeError):
+                cache_log.warning("Cached tool artifacts were invalid for %s", key)
+        from .artifacts import mark_cache_hit
+
+        return mark_cache_hit(value)
     except RedisError as exc:
         _redis_unavailable = True
         cache_log.warning("Redis tool cache unavailable; continuing without cache: %s", exc)
@@ -113,11 +159,26 @@ def _read(key: str) -> str | None:
 
 def _write(key: str, value: str, ttl_seconds: int) -> None:
     global _redis_unavailable
+    from .artifacts import artifact_payload_for_cache
+
+    artifacts = artifact_payload_for_cache(value)
+    with _memory_cache_lock:
+        _memory_cache[key] = (time.monotonic() + ttl_seconds, value, artifacts)
+        _memory_cache.move_to_end(key)
+        while len(_memory_cache) > _MEMORY_CACHE_MAX_ENTRIES:
+            _memory_cache.popitem(last=False)
+
     client = _get_redis_client()
     if client is None:
         return
     try:
         client.set(key, value, ex=ttl_seconds)
+        if artifacts:
+            client.set(
+                f"{key}:artifacts",
+                json.dumps(artifacts, ensure_ascii=False, separators=(",", ":")),
+                ex=ttl_seconds,
+            )
     except RedisError as exc:
         _redis_unavailable = True
         cache_log.warning("Redis tool cache write failed; continuing without cache: %s", exc)

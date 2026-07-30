@@ -36,6 +36,7 @@ from ..market_data import (
 from ..pipeline import MidasError, search_and_scrape
 from ..fundamentals import FundamentalsError, scrape_company
 from ..signals import signals providerError, scrape_signals
+from .artifacts import BATCH_INLINE_CHAR_LIMIT, write_tool_artifact
 from .cache import redis_cached_tool
 from .charts import (  # noqa: F401
     CHART_TOOLS,
@@ -52,11 +53,21 @@ from .charts import (  # noqa: F401
     generate_scatter_chart,
     generate_stacked_bar_chart,
 )
+from .prompts import (
+    INVESTMENT_GRADE_SELECTION_STANDARD,
+    SCORING_RUBRIC,
+    SOURCE_AND_ARTIFACT_RULES,
+)
 
 TWITTER_SEARCH_MAX_CALLS = 2
 """Default maximum number of Grok/X searches available to one agent."""
 
 _TWITTER_SEARCH_TIMEOUT_S = 60
+_CACHE_TTL_LIVE_SECONDS = 5 * 60
+_CACHE_TTL_MARKET_SECONDS = 60 * 60
+_CACHE_TTL_WEB_SECONDS = 6 * 60 * 60
+_CACHE_TTL_COMPANY_SECONDS = 24 * 60 * 60
+_CACHE_TTL_TRANSCRIPT_SECONDS = 7 * 24 * 60 * 60
 
 _NSE_EQUITY_MARKET_URL = "https://www.nseindia.com/market-data/live-equity-market"
 
@@ -316,9 +327,37 @@ class DealType(StrEnum):
     SHORT = "short"
 
 
+class PolicySection(StrEnum):
+    """Detailed research-policy sections available through progressive disclosure."""
+
+    EVIDENCE = "evidence"
+    SCORING = "scoring"
+    SELECTION = "selection"
+
+
 def _json(data: dict[str, Any]) -> str:
     """Serialize tool output consistently for model consumption."""
     return json.dumps(data, ensure_ascii=False, default=str)
+
+
+def _artifact_response(
+    tool_name: str,
+    payload: Any,
+    *,
+    summary: Any | None = None,
+    sources: list[Any] | tuple[Any, ...] = (),
+    fetched_at: str | None = None,
+    max_inline_characters: int = 8_000,
+) -> str:
+    """Store complete evidence and expose only bounded model-facing context."""
+    return write_tool_artifact(
+        tool_name,
+        payload,
+        summary=summary,
+        sources=sources,
+        fetched_at=fetched_at,
+        max_inline_characters=max_inline_characters,
+    )
 
 
 def _compact_index_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -346,6 +385,46 @@ def _fetch_nse_index_list(index: NseIndex) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="midas-nse-") as tmp:
         with NSE(download_folder=tmp, server=True) as client:
             return client.listEquityStocksByIndex(index=index.value)
+
+
+@tool("research_policy")
+def research_policy(section: PolicySection) -> str:
+    """Return an artifact containing one detailed research-policy section.
+
+    Use evidence for citations/calculations, scoring before assigning Business
+    Quality scores, and selection for funnel, governance/liquidity gates, valuation,
+    return models, bear cases, or final decisions.
+    """
+    documents = {
+        PolicySection.EVIDENCE: SOURCE_AND_ARTIFACT_RULES,
+        PolicySection.SCORING: SCORING_RUBRIC,
+        PolicySection.SELECTION: INVESTMENT_GRADE_SELECTION_STANDARD,
+    }
+    descriptions = {
+        PolicySection.EVIDENCE: (
+            "Evidence hierarchy, claim labels, source ledgers, calculation disclosure, "
+            "conflicts, cut-offs and missing-evidence handling."
+        ),
+        PolicySection.SCORING: (
+            "Reproducible 100-point Business Quality rubric, confidence rules and "
+            "classification thresholds."
+        ),
+        PolicySection.SELECTION: (
+            "Candidate funnel, sector metrics, governance/liquidity gates, valuation, "
+            "returns, benchmarks, bear cases and final decision contract."
+        ),
+    }
+    content = documents[section]
+    return _artifact_response(
+        "research_policy",
+        {"section": section.value, "markdown": content},
+        summary={
+            "section": section.value,
+            "description": descriptions[section],
+            "characters": len(content),
+            "instruction": "Read artifact.path selectively by heading before applying this policy.",
+        },
+    )
 
 
 @tool("send_update")
@@ -486,7 +565,7 @@ twitter_search = build_twitter_search_tool()
 
 @tool("web_research")
 @_source_limited(_SOURCE_WEB, "web_research")
-@redis_cached_tool("web_research")
+@redis_cached_tool("web_research", ttl_seconds=_CACHE_TTL_WEB_SECONDS)
 async def web_research(query: str, max_results: int = 5) -> str:
     """Search the public web and summarize only the pages Midas successfully scraped.
 
@@ -503,28 +582,27 @@ async def web_research(query: str, max_results: int = 5) -> str:
     except (MidasError, ValueError) as exc:
         return _json({"ok": False, "error": str(exc)})
 
-    return _json(
+    source_rows = [
         {
-            "ok": True,
-            "query": result.query,
-            "summary": result.compressed,
-            "sources": [
-                {
-                    "id": source.source_id,
-                    "title": source.title,
-                    "url": source.url,
-                    "status": source.status.value,
-                    "error": source.error,
-                }
-                for source in result.sources
-            ],
+            "id": source.source_id,
+            "title": source.title,
+            "url": source.url,
+            "status": source.status.value,
+            "error": source.error,
         }
+        for source in result.sources
+    ]
+    return _artifact_response(
+        "web_research",
+        result.model_dump(mode="json"),
+        summary={"query": result.query, "grounded_summary": result.compressed},
+        sources=source_rows,
     )
 
 
 @tool("company_fundamentals")
 @_source_limited(_SOURCE_FUNDAMENTALS, "company_fundamentals")
-@redis_cached_tool("company_fundamentals")
+@redis_cached_tool("company_fundamentals", ttl_seconds=_CACHE_TTL_COMPANY_SECONDS)
 async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
     """Fetch normal fundamentals provider company fundamentals and market data for an NSE symbol.
 
@@ -549,21 +627,45 @@ async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
 
     payload = result.agent_payload()
-    # The markdown brief is more token-efficient and contains the useful snapshot.
-    return _json(
-        {
-            "ok": True,
-            "symbol": result.symbol,
-            "source_urls": list(result.source_urls),
-            "brief": payload["agent_brief_markdown"],
-            "data": {key: value for key, value in payload.items() if key != "agent_brief_markdown"},
+    compact = {
+        key: value
+        for key, value in payload.items()
+        if key
+        in {
+            "symbol",
+            "name",
+            "url",
+            "basis",
+            "scraped_at",
+            "price",
+            "about",
+            "sector",
+            "top_ratios",
+            "pros",
+            "cons",
+            "chart",
+            "quarters_recent",
+            "profit_loss_recent",
+            "balance_sheet_recent",
+            "cash_flow_recent",
+            "growth",
+            "shareholding_latest",
+            "peers",
+            "announcements",
         }
+    }
+    return _artifact_response(
+        "company_fundamentals",
+        result.model_dump(mode="json"),
+        summary=compact,
+        sources=list(result.source_urls),
+        fetched_at=result.scraped_at,
     )
 
 
 @tool("earnings_transcripts")
 @_source_limited(_SOURCE_FUNDAMENTALS, "earnings_transcripts")
-@redis_cached_tool("earnings_transcripts")
+@redis_cached_tool("earnings_transcripts", ttl_seconds=_CACHE_TTL_TRANSCRIPT_SECONDS)
 async def earnings_transcripts(
     symbol: str,
     consolidated: bool = False,
@@ -599,25 +701,40 @@ async def earnings_transcripts(
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
 
     transcripts = result.page.concall_transcripts
-    return _json(
-        {
-            "ok": True,
-            "symbol": result.symbol,
-            "company": result.page.profile.name,
-            "source_url": result.page.url,
-            "transcripts": [transcript.model_dump(mode="json") for transcript in transcripts],
-            "available_concall_links": [
+    summary = {
+        "symbol": result.symbol,
+        "company": result.page.profile.name,
+        "transcripts": [
+            {
+                "date_label": transcript.date_label,
+                "transcript_url": transcript.transcript_url,
+                "status": transcript.status,
+                "page_count": transcript.page_count,
+                "char_count": transcript.char_count,
+                "summary": transcript.summary,
+                "excerpt": transcript.excerpt if not transcript.summary else None,
+                "error": transcript.error,
+            }
+            for transcript in transcripts
+        ],
+        "available_concall_links": [
                 {"date_label": call.date_label, "transcript_url": call.transcript_url}
                 for call in result.page.concalls
                 if call.transcript_url
-            ],
-        }
+        ],
+    }
+    return _artifact_response(
+        "earnings_transcripts",
+        result.model_dump(mode="json"),
+        summary=summary,
+        sources=[result.page.url, *result.source_urls],
+        fetched_at=result.scraped_at,
     )
 
 
 @tool("market_signals")
 @_source_limited(_SOURCE_SIGNALS, "market_signals")
-@redis_cached_tool("market_signals")
+@redis_cached_tool("market_signals", ttl_seconds=_CACHE_TTL_COMPANY_SECONDS)
 async def market_signals(symbol: str) -> str:
     """Fetch high-impact free signals provider signals that Screener does not cover well.
 
@@ -640,20 +757,18 @@ async def market_signals(symbol: str) -> str:
     except (signals providerError, ValueError) as exc:
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
 
-    return _json(
-        {
-            "ok": True,
-            "symbol": result.symbol,
-            "source_urls": list(result.source_urls),
-            "brief": result.agent_brief(),
-            "data": result.agent_payload(),
-        }
+    return _artifact_response(
+        "market_signals",
+        result.model_dump(mode="json"),
+        summary=result.agent_payload(),
+        sources=list(result.source_urls),
+        fetched_at=result.scraped_at,
     )
 
 
 @tool("nse_list_index")
 @_source_limited(_SOURCE_NSE, "nse_list_index")
-@redis_cached_tool("nse_list_index")
+@redis_cached_tool("nse_list_index", ttl_seconds=_CACHE_TTL_LIVE_SECONDS)
 def nse_list_index(
     index: Annotated[
         NseIndex,
@@ -704,22 +819,26 @@ def nse_list_index(
     market_status = raw.get("marketStatus") if isinstance(raw.get("marketStatus"), dict) else {}
     source_url = f"{_NSE_EQUITY_MARKET_URL}?symbol={index_name.replace(' ', '%20')}"
 
-    return _json(
-        {
-            "ok": True,
-            "index": index_name,
-            "count": len(elements),
-            "timestamp": raw.get("timestamp"),
-            "market_status": market_status.get("marketStatus"),
-            "source_url": source_url,
-            "elements": elements,
-        }
+    payload = {
+        "index": index_name,
+        "count": len(elements),
+        "timestamp": raw.get("timestamp"),
+        "market_status": market_status.get("marketStatus"),
+        "source_url": source_url,
+        "elements": elements,
+    }
+    return _artifact_response(
+        "nse_list_index",
+        payload,
+        summary=payload,
+        sources=[source_url],
+        fetched_at=str(raw.get("timestamp") or ""),
     )
 
 
 @tool("nse_company_filings")
 @_source_limited(_SOURCE_NSE, "nse_company_filings")
-@redis_cached_tool("nse_company_filings")
+@redis_cached_tool("nse_company_filings", ttl_seconds=_CACHE_TTL_MARKET_SECONDS)
 def nse_company_filings(
     symbol: str,
     lookback_days: int = 90,
@@ -754,12 +873,18 @@ def nse_company_filings(
         )
     except _MARKET_TOOL_ERRORS as exc:
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "nse_company_filings",
+        result,
+        summary=result,
+        sources=[result.get("source_url")],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("nse_equity_snapshot")
 @_source_limited(_SOURCE_NSE, "nse_equity_snapshot")
-@redis_cached_tool("nse_equity_snapshot")
+@redis_cached_tool("nse_equity_snapshot", ttl_seconds=_CACHE_TTL_LIVE_SECONDS)
 def nse_equity_snapshot(symbol: str) -> str:
     """Fetch a live NSE equity quote and security identity snapshot.
 
@@ -778,12 +903,18 @@ def nse_equity_snapshot(symbol: str) -> str:
         result = fetch_nse_equity_snapshot(symbol)
     except _MARKET_TOOL_ERRORS as exc:
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "nse_equity_snapshot",
+        result,
+        summary=result,
+        sources=[result.get("source_url")],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("equity_trading_history")
 @_source_limited(_SOURCE_NSE, "equity_trading_history")
-@redis_cached_tool("equity_trading_history")
+@redis_cached_tool("equity_trading_history", ttl_seconds=_CACHE_TTL_MARKET_SECONDS)
 def equity_trading_history(symbol: str, lookback_days: int = 90) -> str:
     """Summarize NSE price, volume, volatility, drawdown, and delivery history.
 
@@ -804,12 +935,18 @@ def equity_trading_history(symbol: str, lookback_days: int = 90) -> str:
         result = fetch_equity_trading_history(symbol, lookback_days=lookback_days)
     except _MARKET_TOOL_ERRORS as exc:
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "equity_trading_history",
+        result,
+        summary=result,
+        sources=[result.get("source_url")],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("nse_market_scan")
 @_source_limited(_SOURCE_NSE, "nse_market_scan")
-@redis_cached_tool("nse_market_scan")
+@redis_cached_tool("nse_market_scan", ttl_seconds=_CACHE_TTL_LIVE_SECONDS)
 def nse_market_scan(
     index: NseIndex = NseIndex.NIFTY_500,
     limit: int = 10,
@@ -827,12 +964,18 @@ def nse_market_scan(
         result = fetch_nse_market_scan(index.value, limit=limit)
     except _MARKET_TOOL_ERRORS as exc:
         return _json({"ok": False, "index": index.value, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "nse_market_scan",
+        result,
+        summary=result,
+        sources=[result.get("source_url")],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("equity_event_calendar")
 @_source_limited(_SOURCE_NSE, "equity_event_calendar")
-@redis_cached_tool("equity_event_calendar")
+@redis_cached_tool("equity_event_calendar", ttl_seconds=_CACHE_TTL_MARKET_SECONDS)
 def equity_event_calendar(
     symbol: str | None = None,
     lookback_days: int = 7,
@@ -869,12 +1012,18 @@ def equity_event_calendar(
         )
     except _MARKET_TOOL_ERRORS as exc:
         return _json({"ok": False, "symbol": normalized_symbol, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "equity_event_calendar",
+        result,
+        summary=result,
+        sources=[result.get("source_url")],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("exchange_deals")
 @_source_limited(_SOURCE_NSE, "exchange_deals")
-@redis_cached_tool("exchange_deals")
+@redis_cached_tool("exchange_deals", ttl_seconds=_CACHE_TTL_MARKET_SECONDS)
 def exchange_deals(
     symbol: str | None = None,
     lookback_days: int = 30,
@@ -910,12 +1059,18 @@ def exchange_deals(
         )
     except _MARKET_TOOL_ERRORS as exc:
         return _json({"ok": False, "symbol": normalized_symbol, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "exchange_deals",
+        result,
+        summary=result,
+        sources=[result.get("source_url")],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("nse_derivatives_snapshot")
 @_source_limited(_SOURCE_NSE, "nse_derivatives_snapshot")
-@redis_cached_tool("nse_derivatives_snapshot")
+@redis_cached_tool("nse_derivatives_snapshot", ttl_seconds=_CACHE_TTL_LIVE_SECONDS)
 def nse_derivatives_snapshot(
     symbol: str,
     expiry: str | None = None,
@@ -953,12 +1108,18 @@ def nse_derivatives_snapshot(
         )
     except _MARKET_TOOL_ERRORS as exc:
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "nse_derivatives_snapshot",
+        result,
+        summary=result,
+        sources=[result.get("source_url")],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("institutional_activity")
 @_source_limited(_SOURCE_NSE, "institutional_activity")
-@redis_cached_tool("institutional_activity")
+@redis_cached_tool("institutional_activity", ttl_seconds=_CACHE_TTL_MARKET_SECONDS)
 def institutional_activity(trade_date: str | None = None) -> str:
     """Fetch latest or historical Indian institutional cash and derivatives reports.
 
@@ -982,12 +1143,22 @@ def institutional_activity(trade_date: str | None = None) -> str:
         result = fetch_institutional_activity(parsed_date)
     except (OSError, TimeoutError, ConnectionError, ImportError, ValueError, RuntimeError) as exc:
         return _json({"ok": False, "trade_date": trade_date, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "institutional_activity",
+        result,
+        summary=result,
+        sources=[
+            value
+            for key, value in result.items()
+            if key.endswith("source_url") and isinstance(value, str)
+        ],
+        fetched_at=result.get("fetched_at"),
+    )
 
 
 @tool("india_market_context")
 @_source_limited(_SOURCE_NSE, "india_market_context")
-@redis_cached_tool("india_market_context")
+@redis_cached_tool("india_market_context", ttl_seconds=_CACHE_TTL_MARKET_SECONDS)
 def india_market_context(
     index: MarketContextIndex = MarketContextIndex.NIFTY_50,
     commodities: list[McxCommodity] | None = None,
@@ -1018,10 +1189,131 @@ def india_market_context(
         )
     except (OSError, TimeoutError, ConnectionError, ImportError, ValueError, RuntimeError) as exc:
         return _json({"ok": False, "index": index.value, "error": str(exc)})
-    return _json({"ok": True, **result})
+    return _artifact_response(
+        "india_market_context",
+        result,
+        summary=result,
+        sources=[
+            value
+            for key, value in result.items()
+            if key.endswith("source_url") and isinstance(value, str)
+        ],
+        fetched_at=result.get("fetched_at"),
+    )
+
+
+@tool("research_batch")
+async def research_batch(requests: list[dict[str, Any]]) -> str:
+    """Run many existing research tools sequentially and return one compact manifest.
+
+    Use this for universe screens and repeated per-company evidence retrieval so one
+    model step can request many independent lookups. Every underlying result remains
+    available through its artifact path, and a failed request does not discard the
+    successful requests.
+
+    Args:
+        requests: One to 100 objects with ``id``, ``tool``, and ``arguments``.
+            Supported tools are the existing web, Screener, signals provider, NSE, market,
+            filings, transcript, and institutional research tools.
+    """
+    if not 1 <= len(requests) <= 100:
+        return _json({"ok": False, "error": "requests must contain 1..100 entries"})
+
+    allowed: dict[str, BaseTool] = {
+        item.name: item
+        for item in (
+            web_research,
+            company_fundamentals,
+            earnings_transcripts,
+            market_signals,
+            nse_list_index,
+            nse_company_filings,
+            nse_equity_snapshot,
+            equity_trading_history,
+            nse_market_scan,
+            equity_event_calendar,
+            exchange_deals,
+            nse_derivatives_snapshot,
+            institutional_activity,
+            india_market_context,
+        )
+    }
+    results: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for position, request in enumerate(requests, start=1):
+        if not isinstance(request, dict):
+            results.append(
+                {
+                    "id": f"request-{position}",
+                    "ok": False,
+                    "error": "request must be an object",
+                }
+            )
+            continue
+        request_id = str(request.get("id") or f"request-{position}")[:120]
+        if request_id in seen_ids:
+            results.append(
+                {"id": request_id, "ok": False, "error": "duplicate request id"}
+            )
+            continue
+        seen_ids.add(request_id)
+        tool_name = str(request.get("tool") or "")
+        arguments = request.get("arguments", {})
+        selected_tool = allowed.get(tool_name)
+        if selected_tool is None:
+            results.append(
+                {
+                    "id": request_id,
+                    "tool": tool_name,
+                    "ok": False,
+                    "error": "unsupported batch tool",
+                }
+            )
+            continue
+        if not isinstance(arguments, dict):
+            results.append(
+                {
+                    "id": request_id,
+                    "tool": tool_name,
+                    "ok": False,
+                    "error": "arguments must be an object",
+                }
+            )
+            continue
+        try:
+            response = await selected_tool.ainvoke(arguments)
+            parsed = json.loads(response) if isinstance(response, str) else response
+            if not isinstance(parsed, dict):
+                parsed = {"ok": False, "error": "tool returned a non-object response"}
+        except Exception as exc:  # validation/provider failures stay local to the request
+            parsed = {"ok": False, "error": str(exc)}
+        manifest_row = {
+            "id": request_id,
+            "tool": tool_name,
+            "ok": parsed.get("ok") is True,
+        }
+        for key in ("result_id", "summary", "sources", "artifact", "freshness", "error"):
+            if key in parsed:
+                manifest_row[key] = parsed[key]
+        results.append(manifest_row)
+
+    succeeded = sum(row.get("ok") is True for row in results)
+    batch_payload = {
+        "request_count": len(requests),
+        "succeeded": succeeded,
+        "failed": len(requests) - succeeded,
+        "results": results,
+    }
+    return _artifact_response(
+        "research_batch",
+        batch_payload,
+        summary=batch_payload,
+        max_inline_characters=BATCH_INLINE_CHAR_LIMIT,
+    )
 
 
 MIDAS_TOOLS = (
+    research_policy,
     send_update,
     web_research,
     company_fundamentals,
@@ -1037,6 +1329,7 @@ MIDAS_TOOLS = (
     nse_derivatives_snapshot,
     institutional_activity,
     india_market_context,
+    research_batch,
     twitter_search,
     *CHART_TOOLS,
 )

@@ -1,13 +1,27 @@
 import asyncio
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
+from midas.deepagents import cache as tool_cache
 from midas.deepagents import tools
+from midas.deepagents.workspace import AGENT_OUTPUT_DIRECTORY
 from midas.models import ScrapeStatus, SearchResult, SourceResult
 from midas.fundamentals.models import CompanyPage, CompanyProfile, ReportingBasis, CompanyFundamentalsResult
 from midas.signals.models import StockIdentity, signals providerSignalsResult
+
+
+@pytest.fixture(autouse=True)
+def isolated_tool_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    tool_cache._memory_cache.clear()
+    monkeypatch.setattr("midas.deepagents.cache._get_redis_client", lambda: None)
+    token = AGENT_OUTPUT_DIRECTORY.set(tmp_path)
+    yield
+    AGENT_OUTPUT_DIRECTORY.reset(token)
 
 
 @pytest.mark.asyncio
@@ -33,8 +47,9 @@ async def test_web_research_wraps_pipeline(monkeypatch: pytest.MonkeyPatch) -> N
         await tools.web_research.ainvoke({"query": "tata motors news", "max_results": 2})
     )
     assert response["ok"] is True
-    assert response["summary"] == "Grounded result"
+    assert response["summary"]["grounded_summary"] == "Grounded result"
     assert response["sources"][0]["url"] == "https://example.com/article"
+    assert response["artifact"]["path"].startswith("/tool_results/")
 
 
 @pytest.mark.asyncio
@@ -163,9 +178,8 @@ async def test_market_signals_tool(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tools, "scrape_signals", fake_signals)
     response = json.loads(await tools.market_signals.ainvoke({"symbol": "TCS"}))
     assert response["ok"] is True
-    assert response["symbol"] == "TCS"
-    assert "brief" in response
-    assert response["data"]["name"] == "Tata Consultancy Services Ltd"
+    assert response["summary"]["symbol"] == "TCS"
+    assert response["summary"]["name"] == "Tata Consultancy Services Ltd"
 
 
 def test_send_update_emits_a_custom_stream_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,6 +196,16 @@ def test_send_update_emits_a_custom_stream_chunk(monkeypatch: pytest.MonkeyPatch
             "update": "I found a primary source and am checking it.",
         }
     ]
+
+
+def test_research_policy_progressively_discloses_full_contract(tmp_path: Path) -> None:
+    response = json.loads(tools.research_policy.invoke({"section": "scoring"}))
+
+    assert response["ok"] is True
+    assert response["summary"]["section"] == "scoring"
+    artifact = tmp_path / response["artifact"]["path"].lstrip("/")
+    stored = json.loads(artifact.read_text(encoding="utf-8"))
+    assert "Competitive advantage and durability" in stored["payload"]["markdown"]
 
 
 def test_nse_list_index_returns_compact_constituents(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,13 +250,14 @@ def test_nse_list_index_returns_compact_constituents(monkeypatch: pytest.MonkeyP
     response = json.loads(tools.nse_list_index.invoke({"index": "NIFTY 50"}))
 
     assert response["ok"] is True
-    assert response["index"] == "NIFTY 50"
-    assert response["count"] == 2
-    assert response["market_status"] == "Open"
-    assert "live-equity-market" in response["source_url"]
-    assert [row["symbol"] for row in response["elements"]] == ["RELIANCE", "TCS"]
-    assert response["elements"][0]["company_name"] == "Reliance Industries Limited"
-    assert response["elements"][0]["last_price"] == 1400.5
+    summary = response["summary"]
+    assert summary["index"] == "NIFTY 50"
+    assert summary["count"] == 2
+    assert summary["market_status"] == "Open"
+    assert "live-equity-market" in summary["source_url"]
+    assert [row["symbol"] for row in summary["elements"]] == ["RELIANCE", "TCS"]
+    assert summary["elements"][0]["company_name"] == "Reliance Industries Limited"
+    assert summary["elements"][0]["last_price"] == 1400.5
 
 
 def test_nse_list_index_reports_fetch_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -286,7 +311,7 @@ def test_nse_company_filings_normalizes_symbol_and_validates_bounds(
     )
 
     assert response["ok"] is True
-    assert response["symbol"] == "TCS"
+    assert response["summary"]["symbol"] == "TCS"
     assert calls == [("TCS", 30, 5)]
     invalid = json.loads(
         tools.nse_company_filings.invoke(
