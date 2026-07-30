@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
+from midas.deepagents.workspace import AGENT_OUTPUT_DIRECTORY
 from midas.tui.events import EventKind, stream_agent_events
+
+
+@pytest.fixture(autouse=True)
+def isolated_telemetry_workspace(tmp_path: Path):
+    token = AGENT_OUTPUT_DIRECTORY.set(tmp_path)
+    yield
+    AGENT_OUTPUT_DIRECTORY.reset(token)
 
 
 class _StreamingAgent:
@@ -173,7 +182,7 @@ async def test_stream_agent_events_reads_provider_content_blocks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_agent_events_emits_incremental_token_usage() -> None:
+async def test_stream_agent_events_emits_incremental_token_usage(tmp_path: Path) -> None:
     agent = _StreamingAgent(
         [
             {
@@ -218,3 +227,6 @@ async def test_stream_agent_events_emits_incremental_token_usage() -> None:
         {"input_tokens": 120, "output_tokens": 8},
         {"input_tokens": 0, "output_tokens": 5},
     ]
+    ledger = (tmp_path / "metrics" / "token_usage.jsonl").read_text(encoding="utf-8")
+    assert ledger.count('"kind":"model_usage"') == 2
+    assert '"input_tokens":120' in ledger

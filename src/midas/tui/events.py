@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from ..deepagents.telemetry import record_model_usage, record_tool_result
+
 
 class EventKind(StrEnum):
     """Events understood by the terminal UI."""
@@ -151,6 +153,15 @@ async def stream_agent_events(
                     max(previous_input, input_tokens),
                     max(previous_output, output_tokens),
                 )
+                try:
+                    record_model_usage(
+                        agent=agent,
+                        call_id=message_id,
+                        input_tokens=input_delta,
+                        output_tokens=output_delta,
+                    )
+                except OSError:
+                    pass
                 yield AgentEvent(
                     EventKind.USAGE,
                     agent,
@@ -200,6 +211,15 @@ async def stream_agent_events(
                     continue
                 status = getattr(message, "status", None)
                 kind = EventKind.TOOL_ERROR if status == "error" else EventKind.TOOL_FINISHED
+                try:
+                    record_tool_result(
+                        agent=agent,
+                        tool=getattr(message, "name", None),
+                        call_id=str(tool_call_id),
+                        content=getattr(message, "content", ""),
+                    )
+                except OSError:
+                    pass
                 yield AgentEvent(
                     kind,
                     agent,
