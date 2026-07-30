@@ -37,6 +37,7 @@ _RENDERED_TEXT_TIMEOUT_MS = 15_000
 _NETWORK_IDLE_TIMEOUT_MS = 2_000
 _MAX_CONCURRENT_PAGES = 3
 _MAX_SOURCE_CHARACTERS = 12_000
+_MAX_COMPRESSED_CHARACTERS = 4_800
 _MIN_SOURCE_CHARACTERS = 120
 _MAX_ERROR_CHARACTERS = 300
 _BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
@@ -502,6 +503,7 @@ async def _compress_sources(query: str, sources: tuple[SourceResult, ...]) -> st
             api_key=api_key,
             timeout=120,
             max_retries=2,
+            max_tokens=1_200,
         )
         response = await model.ainvoke(messages)
     except Exception as exc:
@@ -510,7 +512,7 @@ async def _compress_sources(query: str, sources: tuple[SourceResult, ...]) -> st
     compressed = _message_text(response).strip()
     if not compressed:
         raise CompressionError("Compression returned empty text")
-    return compressed
+    return compressed[:_MAX_COMPRESSED_CHARACTERS].rstrip()
 
 
 def _build_compression_messages(

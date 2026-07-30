@@ -473,10 +473,11 @@ async def test_compression_uses_ollama_openai_compatible_chat(
     assert captured["model_kwargs"] == {
         "model": "gpt-oss:120b-cloud",
         "base_url": "http://localhost:11434/v1",
-        "api_key": "ollama",
-        "timeout": 120,
-        "max_retries": 2,
-    }
+            "api_key": "ollama",
+            "timeout": 120,
+            "max_retries": 2,
+            "max_tokens": 1_200,
+        }
     assert captured["messages"]
 
 
