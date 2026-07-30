@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Search the web, scrape pages, and compress cleaned page text."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
 dependencies = [
     "beautifulsoup4>=4.15.0",
     "camoufox>=0.5.4",
