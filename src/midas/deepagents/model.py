@@ -2,8 +2,36 @@
 
 from __future__ import annotations
 
+import os
+
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
+
+_DEFAULT_COST_CONTEXT_TOKENS = 75_000
+
+
+def _cost_bounded(model: ChatDeepSeek) -> ChatDeepSeek:
+    """Use a cost window for DeepAgents compaction below provider capacity.
+
+    DeepAgents derives its default 85%-trigger/10%-keep summarization settings
+    from ``profile.max_input_tokens``. DeepSeek advertises a one-million-token
+    provider window, which is technically valid but economically unsuitable for
+    an iterative tool agent because the whole growing history is billed again on
+    every step.
+    """
+    raw = os.getenv("MIDAS_CONTEXT_BUDGET_TOKENS", str(_DEFAULT_COST_CONTEXT_TOKENS))
+    try:
+        budget = max(24_000, int(raw))
+    except ValueError:
+        budget = _DEFAULT_COST_CONTEXT_TOKENS
+    profile = dict(model.profile or {})
+    provider_limit = profile.get("max_input_tokens")
+    if isinstance(provider_limit, int):
+        profile["provider_max_input_tokens"] = provider_limit
+        budget = min(budget, provider_limit)
+    profile["max_input_tokens"] = budget
+    model.profile = profile
+    return model
 
 
 def get_main_model() -> ChatDeepSeek:
@@ -11,9 +39,11 @@ def get_main_model() -> ChatDeepSeek:
 
     Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
     """
-    return ChatDeepSeek(
-        model="deepseek-v4-flash",
-        reasoning_effort="max",
+    return _cost_bounded(
+        ChatDeepSeek(
+            model="deepseek-v4-flash",
+            reasoning_effort="high",
+        )
     )
 
 
@@ -23,9 +53,11 @@ def get_research_model() -> ChatDeepSeek:
     Used by research-agent and adversarial-agent for evidence gathering.
     Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
     """
-    return ChatDeepSeek(
-        model="deepseek-v4-flash",
-        reasoning_effort="max",
+    return _cost_bounded(
+        ChatDeepSeek(
+            model="deepseek-v4-flash",
+            reasoning_effort="high",
+        )
     )
 
 
@@ -36,22 +68,24 @@ def get_deep_research_model() -> ChatDeepSeek:
     tuned without changing the broad research and adversarial agents.
     Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
     """
-    return ChatDeepSeek(
-        model="deepseek-v4-pro",
-        reasoning_effort="high",
+    return _cost_bounded(
+        ChatDeepSeek(
+            model="deepseek-v4-pro",
+            reasoning_effort="high",
+        )
     )
 
 
-def get_summarizer_model() -> ChatOpenAI:
-    """Summarizer subagent model (OpenAI).
+def get_summarizer_model() -> ChatDeepSeek:
+    """Report-writing subagent model (DeepSeek).
 
-    Reads ``OPENAI_API_KEY`` from the environment via the library default.
+    Reads ``DEEPSEEK_API_KEY`` from the environment via the library default.
     """
-    return ChatOpenAI(
-        model="gpt-5.6-terra",
-        use_responses_api=True,
-        # OpenAI Responses API cache key (TS: promptCacheKey)
-        model_kwargs={"prompt_cache_key": "odin-research-agent"},
+    return _cost_bounded(
+        ChatDeepSeek(
+            model="deepseek-v4-pro",
+            reasoning_effort="high",
+        )
     )
 
 
