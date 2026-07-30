@@ -5,4 +5,7 @@ __pycache__/
 .ruff_cache/
 dist/
 *.py[cod]
+output/
 output/research/
+tool_results/
+metrics/
