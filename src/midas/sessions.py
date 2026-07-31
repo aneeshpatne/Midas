@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .deepagents.modes import (
+    DEFAULT_RESEARCH_MODE,
+    ResearchMode,
+    normalize_research_mode,
+)
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -20,6 +26,7 @@ class Session:
     updated_at: str
     title: str
     conversation: list[tuple[str, str]]
+    mode: ResearchMode
     input_tokens: int
     output_tokens: int
 
@@ -48,22 +55,36 @@ class SessionStore:
                     updated_at TEXT NOT NULL,
                     title TEXT NOT NULL DEFAULT '',
                     conversation TEXT NOT NULL DEFAULT '[]',
+                    mode TEXT NOT NULL DEFAULT 'deep-wide',
                     input_tokens INTEGER NOT NULL DEFAULT 0,
                     output_tokens INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(sessions)").fetchall()
+            }
+            if "mode" not in columns:
+                connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'deep-wide'"
+                )
 
-    def create(self, session_id: str) -> Session:
+    def create(
+        self,
+        session_id: str,
+        *,
+        mode: ResearchMode = DEFAULT_RESEARCH_MODE,
+    ) -> Session:
         timestamp = _now()
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT OR IGNORE INTO sessions
-                    (session_id, created_at, updated_at)
-                VALUES (?, ?, ?)
+                    (session_id, created_at, updated_at, mode)
+                VALUES (?, ?, ?, ?)
                 """,
-                (session_id, timestamp, timestamp),
+                (session_id, timestamp, timestamp, normalize_research_mode(mode).value),
             )
         session = self.get(session_id)
         if session is None:  # pragma: no cover
@@ -75,6 +96,7 @@ class SessionStore:
         session_id: str,
         conversation: list[tuple[str, str]],
         *,
+        mode: ResearchMode = DEFAULT_RESEARCH_MODE,
         input_tokens: int = 0,
         output_tokens: int = 0,
     ) -> None:
@@ -87,14 +109,15 @@ class SessionStore:
             connection.execute(
                 """
                 INSERT INTO sessions (
-                    session_id, created_at, updated_at, title, conversation,
+                    session_id, created_at, updated_at, title, conversation, mode,
                     input_tokens, output_tokens
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     updated_at = excluded.updated_at,
                     title = excluded.title,
                     conversation = excluded.conversation,
+                    mode = excluded.mode,
                     input_tokens = excluded.input_tokens,
                     output_tokens = excluded.output_tokens
                 """,
@@ -104,6 +127,7 @@ class SessionStore:
                     timestamp,
                     title,
                     json.dumps(conversation, ensure_ascii=False),
+                    normalize_research_mode(mode).value,
                     max(0, input_tokens),
                     max(0, output_tokens),
                 ),
@@ -158,6 +182,7 @@ class SessionStore:
             updated_at=str(row["updated_at"]),
             title=str(row["title"]),
             conversation=conversation,
+            mode=normalize_research_mode(row["mode"]),
             input_tokens=int(row["input_tokens"]),
             output_tokens=int(row["output_tokens"]),
         )
