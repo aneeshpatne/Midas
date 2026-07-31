@@ -17,6 +17,7 @@ from .charts import (
 )
 from .reporting import REPORT_TOOLS, generate_report
 from .tools import (
+    MARKET_INFO_TOOLS,
     MIDAS_TOOLS,
     MarketContextIndex,
     McxCommodity,
@@ -35,6 +36,7 @@ from .tools import (
 )
 
 __all__ = [
+    "MARKET_INFO_TOOLS",
     "MIDAS_TOOLS",
     "REPORT_TOOLS",
     "CHART_TOOLS",

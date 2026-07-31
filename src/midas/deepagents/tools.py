@@ -158,6 +158,15 @@ def _source_limited(source: str, tool_name: str):
     return decorator
 
 
+def enforce_source_concurrency(function, *, source: str, tool_name: str):
+    """Apply the shared single-flight source gate to a callable.
+
+    Used by the agent tool decorators and by the MCP server so external hosts
+    get the same non-blocking ``busy`` response when a source is already active.
+    """
+    return _source_limited(source, tool_name)(function)
+
+
 class NseIndex(StrEnum):
     """Allowed NSE index names for ``nse_list_index`` (NseIndiaApi).
 
@@ -1034,9 +1043,14 @@ def india_market_context(
     return _json({"ok": True, **result})
 
 
-MIDAS_TOOLS = (
-    send_update,
-    web_research,
+# Scrape / market-data tools only (no web search, X, charts, or agent UI helpers).
+# Exposed both to DeepAgents and to the standalone MCP server for external hosts.
+#
+# Each tool already has a per-upstream-source single-flight gate (screener /
+# trendlyne / nse). The MCP server additionally serializes the whole set so
+# external hosts that fire tools in parallel get the same sequential policy
+# the in-app agents are instructed to follow.
+MARKET_INFO_TOOLS = (
     company_fundamentals,
     earnings_transcripts,
     market_signals,
@@ -1050,6 +1064,15 @@ MIDAS_TOOLS = (
     nse_derivatives_snapshot,
     institutional_activity,
     india_market_context,
+)
+
+# Process-wide sequential slot used by the MCP adapter for all market-info tools.
+MARKET_SEQUENTIAL_SOURCE = "market"
+
+MIDAS_TOOLS = (
+    send_update,
+    web_research,
+    *MARKET_INFO_TOOLS,
     twitter_search,
     *CHART_TOOLS,
 )

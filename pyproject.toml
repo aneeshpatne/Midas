@@ -26,11 +26,13 @@ dependencies = [
     "indian-market-data==1.1.1",
     "cloudscraper>=1.2.71",
     "textual>=6.0.0",
+    "mcp>=1.12.0,<2",
 ]
 
 [project.scripts]
 midas = "midas.cli:main"
 midas-tui = "midas.tui:main"
+midas-mcp = "midas.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]

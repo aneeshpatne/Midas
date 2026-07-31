@@ -34,11 +34,12 @@ The interactive surface is a [Textual](https://textual.textualize.io/) terminal 
 | **Artifact-backed reporting** | Ten required Markdown research files, validated A–J final report structure, HTML compilation, and Chromium-based PDF generation via `generate_report`. |
 | **Interactive TUI** | Codex-style terminal session with Shift+Tab research-mode switching, live agent highlighting, tool activity, todos, token usage, Markdown preview, and mode-aware `/new` / `/sessions` / `/resume`. |
 | **Library scrapers** | Synchronous and async public APIs for company scrape (`scrape_company*`), signals provider signals (`scrape_signals*`), and web search (`web_search` / `search_and_scrape`) returning frozen Pydantic models. |
+| **MCP market tools** | Standalone stdio MCP server (`midas-mcp`) exposing Screener, signals provider, and NSE market-info tools for external hosts such as Codex (excludes web search, X, and charts). |
 | **Resilience and isolation** | Per-source single-flight tool gates, sequential scrape/market-data policy, fail-open Redis cache for successful tool results, and per-session filesystem workspaces under `output/<session-id>/`. |
 | **Chart artifacts** | Agent tools for bar, line, area, pie, stacked-bar, scatter, and heatmap PNGs written under `output/charts/` with embed paths returned to the model. |
 
 > [!NOTE]
-> **Implemented:** staged multi-agent workflow, CLI and Textual TUI, research tool suite, Screener/signals provider scrapers, web search pipeline, chart tools, session store, and report validation/PDF rendering.
+> **Implemented:** staged multi-agent workflow, CLI and Textual TUI, research tool suite, Screener/signals provider scrapers, web search pipeline, chart tools, session store, report validation/PDF rendering, and a market-info MCP server (`midas-mcp`).
 >
 > **Optional / environment-dependent:** Redis tool cache (`MIDAS_REDIS_URL` / `REDIS_URL`), `twitter_search` via local `grok` CLI (two calls per agent instance), Camoufox browser smoke tests (`MIDAS_RUN_INTEGRATION=1`), and Chromium/Chrome for PDF export (`REPORT_PDF_BROWSER`).
 >
@@ -101,6 +102,7 @@ flowchart TB
     CLI[midas CLI]
     TUI[midas-tui Textual app]
     LIB[Public Python API]
+    MCP[midas-mcp market tools]
   end
 
   subgraph agents [Agent layer]
@@ -138,6 +140,9 @@ flowchart TB
   LIB --> PIPE
   LIB --> SCR
   LIB --> TL
+  MCP --> SCR
+  MCP --> TL
+  MCP --> MD
   LEAD --> SUB
   LEAD --> TOOLS
   LEAD --> FS
@@ -180,6 +185,7 @@ flowchart TB
 | **Packaging** | [uv](https://docs.astral.sh/uv/), `pyproject.toml` project `midas` 0.1.0 |
 | **UI** | [Textual](https://textual.textualize.io/) TUI; Rich markup for transcript rendering |
 | **Agents** | [DeepAgents](https://github.com/langchain-ai/deepagents), LangGraph streaming, LangChain tools |
+| **MCP** | [Model Context Protocol](https://modelcontextprotocol.io/) Python SDK (`mcp` FastMCP) for external hosts |
 | **Models** | [OpenRouter](https://openrouter.ai/) via `langchain-openrouter` (`openai/gpt-5.6-luna`, OpenAI preferred); Ollama via OpenAI-compatible `ChatOpenAI` for compression |
 | **Search and scrape** | [ddgs](https://pypi.org/project/ddgs/), [Camoufox](https://camoufox.com/), httpx, BeautifulSoup/lxml, [trafilatura](https://trafilatura.readthedocs.io/) |
 | **Market data** | fundamentals provider and signals provider HTML scrapers; `nse`, `nselib`, `indian-market-data`, cloudscraper |
@@ -200,6 +206,7 @@ midas/
 │   └── scrape_signals.py        # signals provider signals CLI example
 ├── src/midas/
 │   ├── cli.py                     # `midas` one-shot research entrypoint
+│   ├── mcp_server.py              # `midas-mcp` stdio MCP server (market tools)
 │   ├── pipeline.py                # Web search, Camoufox scrape, Ollama compress
 │   ├── market_data.py             # Normalized NSE/market provider adapters
 │   ├── sessions.py                # SQLite session store for the TUI
@@ -211,7 +218,7 @@ midas/
 │   │   └── events.py              # Agent stream → UI event mapping
 │   └── deepagents/
 │       ├── deepagent.py           # Lead agent, subagents, workspace binding
-│       ├── tools.py               # Research tools registered on agents
+│       ├── tools.py               # Research tools registered on agents + MCP
 │       ├── prompts.py             # Workflow and scoring contracts
 │       ├── reporting.py           # Artifact validation + PDF report tool
 │       ├── charts.py              # Chart generation tools
@@ -290,6 +297,44 @@ Interactive TUI:
 
 ```bash
 uv run midas-tui
+```
+
+### MCP server (Codex and other hosts)
+
+The same Screener / signals provider / NSE market-info tools used by the research agents are available as a standalone [MCP](https://modelcontextprotocol.io/) server. Web search, X/Twitter search, chart tools, and agent UI helpers are **not** included.
+
+```bash
+uv run midas-mcp
+# equivalent: uv run python -m midas.mcp_server
+```
+
+**Tools exposed:** `company_fundamentals`, `earnings_transcripts`, `market_signals`, `nse_list_index`, `nse_company_filings`, `nse_equity_snapshot`, `equity_trading_history`, `nse_market_scan`, `equity_event_calendar`, `exchange_deals`, `nse_derivatives_snapshot`, `institutional_activity`, `india_market_context`.
+
+**Concurrency:** same single-flight policy as the in-app tools. Screener, signals provider, and NSE each allow only one active call; the MCP adapter also serializes the full market-tool set so parallel host calls get a non-blocking JSON `status: "busy"` / `retryable: true` response instead of overlapping scrapes.
+
+**Codex** — add to `~/.codex/config.toml` (use the absolute path to this repo):
+
+```toml
+[mcp_servers.midas]
+command = "uv"
+args = ["run", "--directory", "/absolute/path/to/Midas", "midas-mcp"]
+# Scrapes can exceed the default tool timeout.
+tool_timeout_sec = 180
+```
+
+After editing config, restart Codex (CLI or IDE). No `OPENROUTER_API_KEY` is required for the MCP server itself; network access is required for scrapers. Optional Redis caching (`MIDAS_REDIS_URL` / `REDIS_URL`) and Ollama (`OLLAMA_BASE_URL`) apply the same way as in-app tools—Ollama is only needed when calling `earnings_transcripts` with summarization enabled.
+
+**Claude Desktop / Cursor-style hosts** use the same stdio command:
+
+```json
+{
+  "mcpServers": {
+    "midas": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/Midas", "midas-mcp"]
+    }
+  }
+}
 ```
 
 Library usage:
