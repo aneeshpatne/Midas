@@ -89,9 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     """Run the Midas CLI and return a shell-compatible exit status."""
     args = _parser().parse_args(argv)
     load_dotenv()
-    if not os.getenv("DEEPSEEK_API_KEY"):
+    if not os.getenv("OPENROUTER_API_KEY"):
         print(
-            "midas: DEEPSEEK_API_KEY is not configured. Add it to .env or export it before "
+            "midas: OPENROUTER_API_KEY is not configured. Add it to .env or export it before "
             "running `uv run midas \"topic\"`.",
             file=sys.stderr,
         )

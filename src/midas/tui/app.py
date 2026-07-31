@@ -542,7 +542,7 @@ class MidasApp(App[None]):
             if self.research_agent is None:
                 await self._build_owned_agent()
             missing = [
-                name for name in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY") if not os.getenv(name)
+                name for name in ("OPENROUTER_API_KEY", "OPENAI_API_KEY") if not os.getenv(name)
             ]
             if missing:
                 await self.query_one(ChatTranscript).add_system(

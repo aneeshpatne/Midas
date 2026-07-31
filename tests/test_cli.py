@@ -45,7 +45,7 @@ async def test_run_topic_prints_updates_and_returns_final_answer(
     assert "[Research update]" in output
 
 
-def test_main_explains_missing_deepseek_key(
+def test_main_explains_missing_openrouter_key(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -53,4 +53,4 @@ def test_main_explains_missing_deepseek_key(
     monkeypatch.setattr(cli.os, "getenv", lambda name: None)
 
     assert cli.main(["Research TCS"]) == 2
-    assert "DEEPSEEK_API_KEY is not configured" in capsys.readouterr().err
+    assert "OPENROUTER_API_KEY is not configured" in capsys.readouterr().err

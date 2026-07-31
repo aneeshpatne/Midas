@@ -124,7 +124,7 @@ flowchart TB
     DDGS[DuckDuckGo search]
     CAM[Camoufox / HTTP scrape]
     OLL[Ollama compression]
-    DS[DeepSeek models]
+    DS[OpenRouter models]
     NSE[NSE and market providers]
     WEB[Screener / signals provider / web]
     REDIS[(Optional Redis)]
@@ -165,7 +165,7 @@ flowchart TB
 **Conventions that show up in the code:**
 
 - **Agent construction** — `create_midas_agent()` remains the Deep Wide compatibility factory; `create_single_stock_agent()` builds the focused one-company graph; `create_research_agent()` dispatches the TUI mode. Both use shared `MIDAS_TOOLS` and an isolated virtual filesystem rooted at `output/<agent_id>/`.
-- **Model split** — lead/research/adversarial use DeepSeek `deepseek-v4-flash`; deep-research and report writing use `deepseek-v4-pro`. Scraped-text and concall compression use a local OpenAI-compatible Ollama endpoint (`gpt-oss:120b-cloud` by default).
+- **Model split** — lead/research/adversarial use OpenRouter `openai/gpt-5.6-luna` (medium reasoning, OpenAI preferred); deep-research and report writing use the same model with high reasoning. Scraped-text and concall compression use a local OpenAI-compatible Ollama endpoint (`gpt-oss:120b-cloud` by default).
 - **Tool contracts** — research tools return compact JSON directly to the calling agent. Duplicate prose/structured representations are omitted, transcript summaries and web compression are bounded, and detailed follow-up tools remain available when a compact market listing is insufficient. Per-source concurrency gates return `busy` immediately when another call from the same source is active.
 - **Token controls** — normalized tool arguments share an in-process/Redis cache with source-appropriate TTLs, so repeated reads avoid scraping and avoid re-injecting alternate copies of the same payload.
 - **Artifact contract** — report compilation validates the ten research files, lints A–J headings and table width, embeds local images, and prints PDF through a Chromium-based browser.
@@ -180,7 +180,7 @@ flowchart TB
 | **Packaging** | [uv](https://docs.astral.sh/uv/), `pyproject.toml` project `midas` 0.1.0 |
 | **UI** | [Textual](https://textual.textualize.io/) TUI; Rich markup for transcript rendering |
 | **Agents** | [DeepAgents](https://github.com/langchain-ai/deepagents), LangGraph streaming, LangChain tools |
-| **Models** | [DeepSeek](https://www.deepseek.com/) via `langchain-deepseek`; Ollama via OpenAI-compatible `ChatOpenAI` for compression |
+| **Models** | [OpenRouter](https://openrouter.ai/) via `langchain-openrouter` (`openai/gpt-5.6-luna`, OpenAI preferred); Ollama via OpenAI-compatible `ChatOpenAI` for compression |
 | **Search and scrape** | [ddgs](https://pypi.org/project/ddgs/), [Camoufox](https://camoufox.com/), httpx, BeautifulSoup/lxml, [trafilatura](https://trafilatura.readthedocs.io/) |
 | **Market data** | fundamentals provider and signals provider HTML scrapers; `nse`, `nselib`, `indian-market-data`, cloudscraper |
 | **Persistence** | Run artifacts on disk; TUI sessions in SQLite (`output/.midas-sessions.sqlite3`); optional Redis tool cache |
@@ -215,7 +215,7 @@ midas/
 │       ├── prompts.py             # Workflow and scoring contracts
 │       ├── reporting.py           # Artifact validation + PDF report tool
 │       ├── charts.py              # Chart generation tools
-│       ├── model.py               # DeepSeek / OpenAI model factories
+│       ├── model.py               # OpenRouter / OpenAI model factories
 │       ├── cache.py               # Fail-open Redis tool cache
 │       └── workspace.py           # Per-invocation output directory context
 ├── tests/                         # Unit, workflow, and optional integration tests
@@ -230,7 +230,7 @@ midas/
 - **Browser automation:** Camoufox browser binary (`uv run python -m camoufox fetch`).
 - **Local LLM server:** [Ollama](https://ollama.com/) for scraped-text / concall compression, with model `gpt-oss:120b-cloud` available by default.
 - **API credentials:**
-  - `DEEPSEEK_API_KEY` — required for the research agents (CLI refuses to start without it).
+  - `OPENROUTER_API_KEY` — required for the research agents (CLI refuses to start without it).
   - `OPENAI_API_KEY` — expected by the TUI setup check for a complete environment; also accepted as a fallback credential string for the Ollama OpenAI-compatible client.
 - **PDF rendering:** Google Chrome or Chromium on `PATH`, the default macOS Chrome path, or `REPORT_PDF_BROWSER`.
 - **Network access:** required for search, scrapers, and market-data tools.
@@ -263,7 +263,7 @@ cp .env.example .env
 Add at least:
 
 ```dotenv
-DEEPSEEK_API_KEY=...
+OPENROUTER_API_KEY=...
 OPENAI_API_KEY=...          # expected by the TUI setup check
 OLLAMA_BASE_URL=http://localhost:11434/v1
 # OLLAMA_API_KEY=ollama     # optional; ChatOpenAI still needs a non-empty key value
@@ -359,7 +359,7 @@ The suite covers pipeline models and cleaning, Screener/signals provider parsers
 ## Roadmap
 
 - Wire or remove the unused OpenAI vision helper (`get_image_model` / `search_image`) so the TUI’s `OPENAI_API_KEY` requirement matches an actual agent tool path.
-- Expand `.env.example` beyond Ollama to document `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, Redis, chart directory, and PDF browser settings used by the application.
+- Expand `.env.example` beyond Ollama to document `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, Redis, chart directory, and PDF browser settings used by the application.
 - Harden long multi-agent runs against provider tool-call batch failures already mitigated in the TUI by clearing incomplete conversation state.
 - Continue equal-depth batching ergonomics for large admitted sets without lowering the fixed research packet.
 
