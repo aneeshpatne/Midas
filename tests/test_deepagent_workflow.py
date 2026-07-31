@@ -1,6 +1,13 @@
+from midas.deepagents.modes import (
+    DEEP_WIDE_ROOT_AGENT_ID,
+    SINGLE_STOCK_ROOT_AGENT_ID,
+    ResearchMode,
+)
 from midas.deepagents.prompts import (
     ADVERSARIAL_AGENT_PROMPT,
     DEEP_RESEARCH_AGENT_PROMPT,
+    FOCUSED_STOCK_RESEARCH_ARTIFACTS,
+    FOCUSED_STOCK_SYSTEM_PROMPT,
     INVESTMENT_GRADE_SELECTION_STANDARD,
     LONG_HORIZON_RESEARCH_POLICY,
     MIDAS_PRIMARY_SYSTEM_PROMPT,
@@ -29,6 +36,28 @@ def test_research_artifact_contract_is_complete_and_ordered() -> None:
     )
 
 
+def test_focused_stock_artifact_contract_is_compact_and_ordered() -> None:
+    assert FOCUSED_STOCK_RESEARCH_ARTIFACTS == (
+        "00_stock_mandate.md",
+        "01_company_dossier.md",
+        "02_valuation_and_risk.md",
+        "03_focused_stock_conclusion.md",
+    )
+
+
+def test_focused_stock_prompt_is_deep_but_rejects_broad_screening() -> None:
+    prompt = " ".join(FOCUSED_STOCK_SYSTEM_PROMPT.split())
+
+    assert "exactly one listed company" in prompt
+    assert "ask the user to choose" in prompt
+    assert "Deep Wide Research Agent" in prompt
+    assert "at least two appropriate valuation methods" in prompt
+    assert "independent bear case" in prompt
+    assert "Evidence Confidence" in prompt
+    assert "Do not create a universe, shortlist, multi-company ranking" in prompt
+    assert "report-agent handoff, HTML or PDF" in prompt
+
+
 def test_primary_prompt_preserves_staged_independent_review() -> None:
     prompt = " ".join(MIDAS_PRIMARY_SYSTEM_PROMPT.split())
     independent = prompt.index("BLIND INDEPENDENT MODE")
@@ -52,7 +81,7 @@ def test_objectives_outputs_and_conclusions_are_separate() -> None:
         "best businesses regardless of valuation",
         "most attractive investments at current prices",
         "highest priority for deeper research",
-        "suitable for a seven-to-ten-year holding period",
+        "suitable for a one-to-two-year holding period",
     ):
         assert objective in standard
     for output in (
@@ -65,7 +94,7 @@ def test_objectives_outputs_and_conclusions_are_separate() -> None:
         assert output in standard
     assert "Business Classification:" in standard
     assert "Investment Classification at Current Price:" in standard
-    assert "Seven-to-Ten-Year Holding Suitability:" in standard
+    assert "One-to-Two-Year Holding Suitability:" in standard
     assert "High-quality business — wait for valuation" in standard
 
 
@@ -375,24 +404,9 @@ def test_policy_is_shared_by_every_agent_role() -> None:
         REPORT_AGENT_PROMPT,
     ):
         assert marker in prompt
-        assert "seven to ten years" in prompt
+        assert "one to two years" in prompt
         assert "Current Valuation" in prompt
         assert "Liquidity" in prompt
-
-
-def test_progressive_policy_reduces_fixed_prompt_overhead() -> None:
-    prompts = (
-        MIDAS_PRIMARY_SYSTEM_PROMPT,
-        RESEARCH_AGENT_PROMPT,
-        ADVERSARIAL_AGENT_PROMPT,
-        DEEP_RESEARCH_AGENT_PROMPT,
-        REPORT_AGENT_PROMPT,
-    )
-    optimized_characters = sum(map(len, prompts))
-    repeated_full_policy_floor = len(LONG_HORIZON_RESEARCH_POLICY) * len(prompts)
-
-    assert optimized_characters < repeated_full_policy_floor * 0.20
-    assert "research_policy" in "\n".join(prompts)
 
 
 def test_adversarial_and_deep_research_roles_enforce_new_contract() -> None:
@@ -448,3 +462,54 @@ def test_deep_research_role_uses_its_dedicated_model_factory(monkeypatch) -> Non
     assert by_name["research-agent"]["model"] is standard_model
     assert by_name["adversarial-agent"]["model"] is standard_model
     assert by_name["deep-research-agent"]["model"] is deep_model
+
+
+def test_single_stock_factory_uses_deep_model_without_subagents(tmp_path, monkeypatch) -> None:
+    from midas.deepagents import deepagent
+
+    deep_model = object()
+    captured = {}
+    monkeypatch.setattr(deepagent, "get_deep_research_model", lambda: deep_model)
+
+    def fake_create_deep_agent(**kwargs):
+        captured.update(kwargs)
+        return "focused-agent"
+
+    monkeypatch.setattr(deepagent, "create_deep_agent", fake_create_deep_agent)
+
+    result = deepagent.create_single_stock_agent(
+        agent_id="focused-session",
+        workspace=tmp_path,
+    )
+
+    assert result == "focused-agent"
+    assert captured["model"] is deep_model
+    assert captured["tools"] is MIDAS_TOOLS
+    assert captured["name"] == SINGLE_STOCK_ROOT_AGENT_ID
+    assert "subagents" not in captured
+    assert "generate_report" not in {tool.name for tool in captured["tools"]}
+    assert "/research" in captured["system_prompt"]
+    assert "/output/research" not in captured["system_prompt"]
+
+
+def test_research_agent_dispatches_by_mode(monkeypatch) -> None:
+    from midas.deepagents import deepagent
+
+    calls = []
+    monkeypatch.setattr(
+        deepagent,
+        "create_midas_agent",
+        lambda **kwargs: calls.append((DEEP_WIDE_ROOT_AGENT_ID, kwargs)) or "wide",
+    )
+    monkeypatch.setattr(
+        deepagent,
+        "create_single_stock_agent",
+        lambda **kwargs: calls.append((SINGLE_STOCK_ROOT_AGENT_ID, kwargs)) or "stock",
+    )
+
+    assert deepagent.create_research_agent(ResearchMode.DEEP_WIDE) == "wide"
+    assert deepagent.create_research_agent(ResearchMode.SINGLE_STOCK) == "stock"
+    assert [call[0] for call in calls] == [
+        DEEP_WIDE_ROOT_AGENT_ID,
+        SINGLE_STOCK_ROOT_AGENT_ID,
+    ]

@@ -12,9 +12,17 @@ from .model import (
     get_research_model,
     get_summarizer_model,
 )
+from .modes import (
+    DEEP_WIDE_ROOT_AGENT_ID,
+    DEFAULT_RESEARCH_MODE,
+    SINGLE_STOCK_ROOT_AGENT_ID,
+    ResearchMode,
+    normalize_research_mode,
+)
 from .prompts import (
     ADVERSARIAL_AGENT_PROMPT,
     DEEP_RESEARCH_AGENT_PROMPT,
+    FOCUSED_STOCK_SYSTEM_PROMPT,
     MIDAS_PRIMARY_SYSTEM_PROMPT,
     REPORT_AGENT_PROMPT,
     RESEARCH_AGENT_PROMPT,
@@ -25,18 +33,6 @@ from .tools import MIDAS_TOOLS
 _AGENT_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{7,127}$")
 
 MIDAS_TOOL_GUIDANCE = """Use research tools to gather evidence before factual claims.
-Tool responses use compact envelopes. Treat `summary` as navigation context and
-`artifact.path` as the complete normalized evidence. Read or grep only the relevant
-artifact sections needed for a decisive claim; do not load a whole artifact merely
-to restate its summary. Reuse a returned `result_id` instead of repeating an
-identical lookup.
-
-For multi-company or multi-source screens, prefer one `research_batch` call with
-explicit request IDs. It runs the existing tools sequentially, preserves their
-validation/source limits, and returns artifact pointers for every successful item.
-Do not replace a batch with dozens of single calls unless individual drill-down is
-actually needed.
-
 Start with the complete universe and primary/company evidence: use nse_list_index for
 live NSE constituents and methodology context; nse_company_filings for exchange
 announcements, results, shareholding, governance and corporate actions; Screener for
@@ -198,13 +194,9 @@ def build_subagents(
     ]
 
 
-def create_midas_agent(
-    *,
-    checkpointer: Any | None = None,
-    agent_id: str | None = None,
-    workspace: Path | None = None,
-):
-    """Create the staged Midas lead agent with a persistent, restricted workspace."""
+def _agent_environment(
+    *, agent_id: str | None, workspace: Path | None
+) -> tuple[Path, FilesystemBackend, list[FilesystemPermission]]:
     project_workspace = (workspace or Path.cwd()).resolve()
     if agent_id is None:
         agent_workspace = project_workspace
@@ -223,6 +215,20 @@ def create_midas_agent(
             mode="allow",
         ),
     ]
+    return agent_workspace, backend, permissions
+
+
+def create_midas_agent(
+    *,
+    checkpointer: Any | None = None,
+    agent_id: str | None = None,
+    workspace: Path | None = None,
+):
+    """Create the staged Deep Wide Research Agent."""
+    agent_workspace, backend, permissions = _agent_environment(
+        agent_id=agent_id,
+        workspace=workspace,
+    )
     return create_deep_agent(
         model=get_main_model(),
         tools=MIDAS_TOOLS,
@@ -234,7 +240,52 @@ def create_midas_agent(
         backend=backend,
         permissions=permissions,
         checkpointer=checkpointer,
-        name="midas-lead-analyst",
+        name=DEEP_WIDE_ROOT_AGENT_ID,
+    )
+
+
+def create_single_stock_agent(
+    *,
+    checkpointer: Any | None = None,
+    agent_id: str | None = None,
+    workspace: Path | None = None,
+):
+    """Create the narrow, investment-grade Single Stock Research Agent."""
+    _, backend, permissions = _agent_environment(
+        agent_id=agent_id,
+        workspace=workspace,
+    )
+    return create_deep_agent(
+        model=get_deep_research_model(),
+        tools=MIDAS_TOOLS,
+        system_prompt=_workspace_prompt(
+            f"{FOCUSED_STOCK_SYSTEM_PROMPT}\n\n{MIDAS_TOOL_GUIDANCE}",
+            isolated=agent_id is not None,
+        ),
+        backend=backend,
+        permissions=permissions,
+        checkpointer=checkpointer,
+        name=SINGLE_STOCK_ROOT_AGENT_ID,
+    )
+
+
+def create_research_agent(
+    mode: ResearchMode = DEFAULT_RESEARCH_MODE,
+    *,
+    checkpointer: Any | None = None,
+    agent_id: str | None = None,
+    workspace: Path | None = None,
+):
+    """Create the top-level graph for a selected research mode."""
+    factory = (
+        create_single_stock_agent
+        if normalize_research_mode(mode) == ResearchMode.SINGLE_STOCK
+        else create_midas_agent
+    )
+    return factory(
+        checkpointer=checkpointer,
+        agent_id=agent_id,
+        workspace=workspace,
     )
 
 
