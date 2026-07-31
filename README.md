@@ -19,20 +19,20 @@ Midas turns a sector, NSE index, company, or research question into staged multi
 
 ## Overview
 
-Midas accepts an equity-research prompt—typically an Indian sector, NSE index, company, or event—and runs a staged research workflow. Primary and adversarial agents screen the full universe, equal-depth diligence is applied to every admitted name, and the lead analyst produces an investment-committee decision that may select zero to three candidates. The user receives numbered Markdown research artifacts plus a compiled A–J decision report (`10_final_report.md`, HTML, and PDF). Outputs are evidence-dated research assessments with source ledgers, scoring support, and explicit uncertainty—not personalized buy/sell recommendations.
+Midas provides two equity-research modes. The **Deep Wide Research Agent** screens an Indian sector or NSE universe through primary, adversarial, equal-depth, and investment-committee stages, producing numbered Markdown artifacts plus a compiled A–J report (`10_final_report.md`, HTML, and PDF). The **Single Stock Research Agent** investigates exactly one listed company at depth and produces a compact four-file dossier covering identity, business quality, governance, valuation, risk, and conclusion. Outputs are evidence-dated research assessments with source ledgers, scoring support, and explicit uncertainty—not personalized buy/sell recommendations.
 
-The interactive surface is a [Textual](https://textual.textualize.io/) terminal UI with streaming agent activity, session resume, and Markdown artifact preview. The same agent stack is available as a one-shot CLI (`midas`) and as a Python library. Supporting systems include DuckDuckGo search with Camoufox page rendering, Screener and signals provider scrapers, NSE/market-data adapters, optional Redis tool caching, and Ollama-backed compression for scraped text and concall transcripts. Research runs write durable artifacts under `output/`; TUI sessions isolate each agent workspace and store conversation history in SQLite.
+The interactive surface is a [Textual](https://textual.textualize.io/) terminal UI with Shift+Tab mode switching, streaming agent activity, mode-aware session resume, and Markdown artifact preview. The same agent stack is available as a one-shot CLI (`midas`) and as a Python library. Supporting systems include DuckDuckGo search with Camoufox page rendering, Screener and signals provider scrapers, NSE/market-data adapters, optional Redis tool caching, and Ollama-backed compression for scraped text and concall transcripts. Research runs write durable artifacts under `output/`; TUI sessions isolate each agent workspace and store conversation history in SQLite.
 
 ## Features
 
 | Area | What the project provides |
 | --- | --- |
-| **Staged research desk** | Lead analyst plus `research-agent`, `adversarial-agent`, `deep-research-agent`, and `report-agent` roles that produce a fixed sequence of research artifacts from mandate through investment-committee decision. |
-| **Long-horizon decision standard** | Seven-to-ten-year owner-style analysis that separates business quality, valuation, evidence confidence, governance, and liquidity; zero to three final selections; incomplete work is labeled rather than forced. |
+| **Two research modes** | Deep Wide Research Agent for staged universe screening and reporting; Single Stock Research Agent for narrow, investment-grade diligence on exactly one company. |
+| **Investment-horizon decision standard** | One-to-two-year owner-style analysis that separates business quality, valuation, evidence confidence, governance, and liquidity; zero to three final selections; incomplete work is labeled rather than forced. |
 | **Indian market evidence tools** | Screener fundamentals/statements/peers/charts/concalls, signals provider consensus/SWOT/superstars/ASM-GSM/FII-DII, NSE constituents and filings, quotes, trading history, market scans, event calendars, deals, derivatives snapshots, institutional flows, and Nifty/MCX context. |
 | **Grounded web research** | Search → Camoufox/HTTP scrape → local main-text extraction → Ollama compression of scraped corpus only, with full cleaned text retained on successful sources. |
 | **Artifact-backed reporting** | Ten required Markdown research files, validated A–J final report structure, HTML compilation, and Chromium-based PDF generation via `generate_report`. |
-| **Interactive TUI** | Codex-style terminal session with live agent highlighting, tool activity, todos, token usage, Markdown file tree/preview, `/new` / `/sessions` / `/resume`, and cancel-on-idle controls. |
+| **Interactive TUI** | Codex-style terminal session with Shift+Tab research-mode switching, live agent highlighting, tool activity, todos, token usage, Markdown preview, and mode-aware `/new` / `/sessions` / `/resume`. |
 | **Library scrapers** | Synchronous and async public APIs for company scrape (`scrape_company*`), signals provider signals (`scrape_signals*`), and web search (`web_search` / `search_and_scrape`) returning frozen Pydantic models. |
 | **Resilience and isolation** | Per-source single-flight tool gates, sequential scrape/market-data policy, fail-open Redis cache for successful tool results, and per-session filesystem workspaces under `output/<session-id>/`. |
 | **Chart artifacts** | Agent tools for bar, line, area, pie, stacked-bar, scatter, and heatmap PNGs written under `output/charts/` with embed paths returned to the model. |
@@ -104,7 +104,8 @@ flowchart TB
   end
 
   subgraph agents [Agent layer]
-    LEAD[midas-lead-analyst]
+    LEAD[Deep Wide Research Agent]
+    STOCK[Single Stock Research Agent]
     SUB[research / adversarial / deep-research / report]
     FS[FilesystemBackend workspace]
   end
@@ -132,6 +133,7 @@ flowchart TB
 
   CLI --> LEAD
   TUI --> LEAD
+  TUI --> STOCK
   TUI --> SESS
   LIB --> PIPE
   LIB --> SCR
@@ -139,6 +141,8 @@ flowchart TB
   LEAD --> SUB
   LEAD --> TOOLS
   LEAD --> FS
+  STOCK --> TOOLS
+  STOCK --> FS
   SUB --> TOOLS
   SUB --> FS
   TOOLS --> PIPE
@@ -153,16 +157,17 @@ flowchart TB
   TL --> WEB
   MD --> NSE
   LEAD --> DS
+  STOCK --> DS
   SUB --> DS
   REP --> CHROME
 ```
 
 **Conventions that show up in the code:**
 
-- **Agent construction** — `create_midas_agent()` builds a DeepAgents graph with shared `MIDAS_TOOLS`, role-specific system prompts, and a virtual filesystem rooted at the project or `output/<agent_id>/`.
+- **Agent construction** — `create_midas_agent()` remains the Deep Wide compatibility factory; `create_single_stock_agent()` builds the focused one-company graph; `create_research_agent()` dispatches the TUI mode. Both use shared `MIDAS_TOOLS` and an isolated virtual filesystem rooted at `output/<agent_id>/`.
 - **Model split** — lead/research/adversarial use DeepSeek `deepseek-v4-flash`; deep-research and report writing use `deepseek-v4-pro`. Scraped-text and concall compression use a local OpenAI-compatible Ollama endpoint (`gpt-oss:120b-cloud` by default).
-- **Tool contracts** — successful research tools return a bounded summary plus a content-addressed `/tool_results/<result-id>.json` artifact containing the complete normalized evidence. `research_batch` runs up to 100 existing lookups sequentially in one model round trip. Per-source concurrency gates still return `busy` immediately when another call from the same source is active.
-- **Token controls** — detailed scoring/evidence/selection policies are loaded through `research_policy` only when relevant, and DeepAgents compacts growing history at a cost window well below DeepSeek's provider limit. Per-run model/tool-size telemetry is written to `metrics/token_usage.jsonl`.
+- **Tool contracts** — research tools return compact JSON directly to the calling agent. Duplicate prose/structured representations are omitted, transcript summaries and web compression are bounded, and detailed follow-up tools remain available when a compact market listing is insufficient. Per-source concurrency gates return `busy` immediately when another call from the same source is active.
+- **Token controls** — normalized tool arguments share an in-process/Redis cache with source-appropriate TTLs, so repeated reads avoid scraping and avoid re-injecting alternate copies of the same payload.
 - **Artifact contract** — report compilation validates the ten research files, lints A–J headings and table width, embeds local images, and prints PDF through a Chromium-based browser.
 - **Session ownership** — the TUI owns `SessionStore` at interaction boundaries; each turn sets `AGENT_OUTPUT_DIRECTORY` so host-side tools write into the isolated session tree.
 - **Failure handling** — partial scrape failures do not abort web search when at least one page succeeds; missing API keys surface as setup errors rather than silent runs; incomplete tool-call batches in the TUI clear conversation state while leaving generated files intact.
@@ -263,7 +268,6 @@ OPENAI_API_KEY=...          # expected by the TUI setup check
 OLLAMA_BASE_URL=http://localhost:11434/v1
 # OLLAMA_API_KEY=ollama     # optional; ChatOpenAI still needs a non-empty key value
 # MIDAS_REDIS_URL=redis://localhost:6379/0
-# MIDAS_CONTEXT_BUDGET_TOKENS=75000  # cost window; provider capacity is unchanged
 # REPORT_PDF_BROWSER=/path/to/chrome-or-chromium
 ```
 
@@ -320,15 +324,20 @@ answer = await agent.ainvoke(
 
 | Input | Action |
 | --- | --- |
-| `Enter` | Submit the prompt |
+| `/` | Open the slash-command dropdown |
+| `Up` / `Down` | Navigate visible slash-command suggestions |
+| `Tab` or `Enter` | Complete the highlighted command; press `Enter` again to execute it |
+| `Escape` | Dismiss slash-command suggestions without clearing the prompt |
+| `Enter` | Submit the prompt when command suggestions are closed |
 | `Ctrl+C` | Cancel active research, or quit while idle |
-| `Ctrl+N` or `/new` | Save the current session and start a fresh context |
-| `/sessions` | List recent resumable session IDs |
+| `Ctrl+N` or `/new` | Save the current session and start a fresh context in the current mode |
+| `Shift+Tab` | Save the current session and start a fresh session in the other research mode |
+| `/sessions` | List recent resumable session IDs and their research modes |
 | `/resume [session-id]` | Resume a saved session (previous session if ID omitted) |
 | `F2` / `F3` | Toggle agents/todos and files/preview panes |
 | `/exit` or `/quit` | Save and exit |
 
-Session metadata and conversation history are stored in `output/.midas-sessions.sqlite3`. Each agent sees only its isolated `output/<session-id>/` tree.
+Session metadata, research mode, and conversation history are stored in `output/.midas-sessions.sqlite3`. Each agent sees only its isolated `output/<session-id>/` tree. Switching modes starts a fresh session so broad-screening context and single-stock artifacts are never mixed; `/resume` restores the saved mode.
 
 ## Running tests
 
