@@ -29,7 +29,7 @@ _redis_client: Redis | None = None
 _redis_url: str | None = None
 _redis_unavailable = False
 _MEMORY_CACHE_MAX_ENTRIES = 256
-_memory_cache: OrderedDict[str, tuple[float, str, dict[str, str]]] = OrderedDict()
+_memory_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
 _memory_cache_lock = threading.Lock()
 
 
@@ -122,13 +122,10 @@ def _read(key: str) -> str | None:
     with _memory_cache_lock:
         memory = _memory_cache.get(key)
         if memory is not None:
-            expires_at, value, artifacts = memory
+            expires_at, value = memory
             if expires_at > time.monotonic():
                 _memory_cache.move_to_end(key)
-                from .artifacts import mark_cache_hit, materialize_cached_artifacts
-
-                materialize_cached_artifacts(artifacts)
-                return mark_cache_hit(value)
+                return value
             _memory_cache.pop(key, None)
 
     client = _get_redis_client()
@@ -138,19 +135,7 @@ def _read(key: str) -> str | None:
         value = client.get(key)
         if not isinstance(value, str):
             return None
-        artifact_value = client.get(f"{key}:artifacts")
-        if isinstance(artifact_value, str):
-            try:
-                artifacts = json.loads(artifact_value)
-                if isinstance(artifacts, dict):
-                    from .artifacts import materialize_cached_artifacts
-
-                    materialize_cached_artifacts(artifacts)
-            except (OSError, TypeError, json.JSONDecodeError):
-                cache_log.warning("Cached tool artifacts were invalid for %s", key)
-        from .artifacts import mark_cache_hit
-
-        return mark_cache_hit(value)
+        return value
     except RedisError as exc:
         _redis_unavailable = True
         cache_log.warning("Redis tool cache unavailable; continuing without cache: %s", exc)
@@ -159,11 +144,8 @@ def _read(key: str) -> str | None:
 
 def _write(key: str, value: str, ttl_seconds: int) -> None:
     global _redis_unavailable
-    from .artifacts import artifact_payload_for_cache
-
-    artifacts = artifact_payload_for_cache(value)
     with _memory_cache_lock:
-        _memory_cache[key] = (time.monotonic() + ttl_seconds, value, artifacts)
+        _memory_cache[key] = (time.monotonic() + ttl_seconds, value)
         _memory_cache.move_to_end(key)
         while len(_memory_cache) > _MEMORY_CACHE_MAX_ENTRIES:
             _memory_cache.popitem(last=False)
@@ -173,12 +155,6 @@ def _write(key: str, value: str, ttl_seconds: int) -> None:
         return
     try:
         client.set(key, value, ex=ttl_seconds)
-        if artifacts:
-            client.set(
-                f"{key}:artifacts",
-                json.dumps(artifacts, ensure_ascii=False, separators=(",", ":")),
-                ex=ttl_seconds,
-            )
     except RedisError as exc:
         _redis_unavailable = True
         cache_log.warning("Redis tool cache write failed; continuing without cache: %s", exc)

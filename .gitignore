@@ -7,5 +7,3 @@ dist/
 *.py[cod]
 output/
 output/research/
-tool_results/
-metrics/

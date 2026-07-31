@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ..deepagents.telemetry import record_model_usage, record_tool_result
+from ..deepagents.modes import (
+    DEEP_WIDE_ROOT_AGENT_ID,
+    LEGACY_ROOT_AGENT_ID,
+    SINGLE_STOCK_ROOT_AGENT_ID,
+)
 
 
 class EventKind(StrEnum):
@@ -36,7 +40,9 @@ class AgentEvent:
 
 
 AGENT_LABELS = {
-    "midas-lead-analyst": "Lead analyst",
+    DEEP_WIDE_ROOT_AGENT_ID: "Deep Wide Research Agent",
+    SINGLE_STOCK_ROOT_AGENT_ID: "Single Stock Research Agent",
+    LEGACY_ROOT_AGENT_ID: "Deep Wide Research Agent",
     "research-agent": "Research agent",
     "adversarial-agent": "Adversarial agent",
     "deep-research-agent": "Deep research agent",
@@ -49,10 +55,17 @@ def display_agent(agent: str) -> str:
     return AGENT_LABELS.get(agent, agent.replace("-", " ").title())
 
 
-def _agent_for(part: Mapping[str, Any], metadata: Mapping[str, Any] | None = None) -> str:
+def _agent_for(
+    part: Mapping[str, Any],
+    metadata: Mapping[str, Any] | None = None,
+    *,
+    root_agent_id: str = DEEP_WIDE_ROOT_AGENT_ID,
+) -> str:
     if metadata:
         configured = metadata.get("lc_agent_name")
         if isinstance(configured, str) and configured:
+            if configured == LEGACY_ROOT_AGENT_ID:
+                return root_agent_id
             return configured
     namespace = part.get("ns", ())
     if isinstance(namespace, Sequence) and namespace:
@@ -60,7 +73,7 @@ def _agent_for(part: Mapping[str, Any], metadata: Mapping[str, Any] | None = Non
             candidate = str(segment).split(":", 1)[0]
             if candidate in AGENT_LABELS:
                 return candidate
-    return "midas-lead-analyst"
+    return root_agent_id
 
 
 def _text_blocks(content: Any) -> tuple[str, str]:
@@ -114,6 +127,7 @@ async def stream_agent_events(
     research_agent: Any,
     prompt: str,
     *,
+    root_agent_id: str = DEEP_WIDE_ROOT_AGENT_ID,
     history: Sequence[tuple[str, str]] = (),
     config: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[AgentEvent]:
@@ -134,7 +148,7 @@ async def stream_agent_events(
         if mode == "messages" and isinstance(data, Sequence) and len(data) == 2:
             message, metadata = data
             metadata = metadata if isinstance(metadata, Mapping) else {}
-            agent = _agent_for(part, metadata)
+            agent = _agent_for(part, metadata, root_agent_id=root_agent_id)
             content_blocks = getattr(message, "content_blocks", None)
             source_content = content_blocks or getattr(message, "content", "")
             text, reasoning = _text_blocks(source_content)
@@ -153,15 +167,6 @@ async def stream_agent_events(
                     max(previous_input, input_tokens),
                     max(previous_output, output_tokens),
                 )
-                try:
-                    record_model_usage(
-                        agent=agent,
-                        call_id=message_id,
-                        input_tokens=input_delta,
-                        output_tokens=output_delta,
-                    )
-                except OSError:
-                    pass
                 yield AgentEvent(
                     EventKind.USAGE,
                     agent,
@@ -170,7 +175,7 @@ async def stream_agent_events(
                 )
             continue
 
-        agent = _agent_for(part)
+        agent = _agent_for(part, root_agent_id=root_agent_id)
         if mode == "custom":
             if isinstance(data, Mapping) and data.get("type") == "deep_agent_update":
                 yield AgentEvent(EventKind.UPDATE, agent, str(data.get("update", "")))
@@ -211,15 +216,6 @@ async def stream_agent_events(
                     continue
                 status = getattr(message, "status", None)
                 kind = EventKind.TOOL_ERROR if status == "error" else EventKind.TOOL_FINISHED
-                try:
-                    record_tool_result(
-                        agent=agent,
-                        tool=getattr(message, "name", None),
-                        call_id=str(tool_call_id),
-                        content=getattr(message, "content", ""),
-                    )
-                except OSError:
-                    pass
                 yield AgentEvent(
                     kind,
                     agent,
@@ -227,4 +223,4 @@ async def stream_agent_events(
                     str(tool_call_id),
                     getattr(message, "name", None),
                 )
-    yield AgentEvent(EventKind.STATUS, "midas-lead-analyst", "completed")
+    yield AgentEvent(EventKind.STATUS, root_agent_id, "completed")
