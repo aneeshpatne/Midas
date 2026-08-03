@@ -8,7 +8,7 @@ from midas.deepagents import cache as tool_cache
 from midas.deepagents import tools
 from midas.models import ScrapeStatus, SearchResult, SourceResult
 from midas.fundamentals.models import CompanyPage, CompanyProfile, ReportingBasis, CompanyFundamentalsResult
-from midas.signals.models import StockIdentity, signals providerSignalsResult
+from midas.signals.models import StockIdentity, MarketSignalsResult
 
 
 @pytest.fixture(autouse=True)
@@ -47,12 +47,12 @@ async def test_web_research_wraps_pipeline(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_screener_tools_use_distinct_concall_settings(
+async def test_fundamentals_tools_use_distinct_concall_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
     page = CompanyPage(
-        url="https://www.fundamentals provider/company/TCS/",
+        url="https://example.com/fundamentals/company/TCS/",
         symbol="TCS",
         basis=ReportingBasis.STANDALONE,
         profile=CompanyProfile(name="Tata Consultancy Services Ltd", symbol="TCS"),
@@ -88,7 +88,7 @@ async def test_same_source_call_returns_busy_immediately_and_slot_is_released(
     release = asyncio.Event()
     calls: list[dict[str, object]] = []
     page = CompanyPage(
-        url="https://www.fundamentals provider/company/TCS/",
+        url="https://example.com/fundamentals/company/TCS/",
         symbol="TCS",
         basis=ReportingBasis.STANDALONE,
         profile=CompanyProfile(name="Tata Consultancy Services Ltd", symbol="TCS"),
@@ -121,11 +121,11 @@ async def test_same_source_call_returns_busy_immediately_and_slot_is_released(
         "ok": False,
         "status": "busy",
         "retryable": True,
-        "source": "screener",
+        "source": "fundamentals",
         "tool": "earnings_transcripts",
         "message": (
-            "Another screener tool is already running. Wait for it to finish, then retry "
-            "earnings_transcripts; do not start another screener tool while it is busy."
+            "Another fundamentals tool is already running. Wait for it to finish, then retry "
+            "earnings_transcripts; do not start another fundamentals tool while it is busy."
         ),
     }
     assert len(calls) == 1
@@ -141,13 +141,13 @@ async def test_same_source_call_returns_busy_immediately_and_slot_is_released(
 def test_source_gate_is_nonblocking_and_allows_different_sources() -> None:
     gate = tools._SourceConcurrencyGate()
 
-    assert gate.try_acquire("screener") is True
-    assert gate.try_acquire("screener") is False
-    assert gate.try_acquire("trendlyne") is True
-    gate.release("screener")
-    gate.release("trendlyne")
-    assert gate.try_acquire("screener") is True
-    gate.release("screener")
+    assert gate.try_acquire("fundamentals") is True
+    assert gate.try_acquire("fundamentals") is False
+    assert gate.try_acquire("signals") is True
+    gate.release("fundamentals")
+    gate.release("signals")
+    assert gate.try_acquire("fundamentals") is True
+    gate.release("fundamentals")
 
 
 @pytest.mark.asyncio
@@ -156,16 +156,16 @@ async def test_market_signals_tool(monkeypatch: pytest.MonkeyPatch) -> None:
         stock_id=1372,
         symbol="TCS",
         name="Tata Consultancy Services Ltd",
-        page_url="https://signals provider/equity/1372/TCS/tata-consultancy-services-ltd/",
+        page_url="https://example.com/signals/equity/1372/TCS/tata-consultancy-services-ltd/",
     )
-    result = signals providerSignalsResult(
+    result = MarketSignalsResult(
         symbol="TCS",
         identity=identity,
         scraped_at="2026-07-28T00:00:00+00:00",
         source_urls=(identity.page_url,),
     )
 
-    async def fake_signals(symbol: str, **kwargs: object) -> signals providerSignalsResult:
+    async def fake_signals(symbol: str, **kwargs: object) -> MarketSignalsResult:
         assert symbol == "TCS"
         return result
 

@@ -21,7 +21,7 @@ Midas turns a sector, NSE index, company, or research question into staged multi
 
 Midas provides two equity-research modes. The **Deep Wide Research Agent** screens an Indian sector or NSE universe through primary, adversarial, equal-depth, and investment-committee stages, producing numbered Markdown artifacts plus a compiled A–J report (`10_final_report.md`, HTML, and PDF). The **Single Stock Research Agent** investigates exactly one listed company at depth and produces a compact four-file dossier covering identity, business quality, governance, valuation, risk, and conclusion. Outputs are evidence-dated research assessments with source ledgers, scoring support, and explicit uncertainty—not personalized buy/sell recommendations.
 
-The interactive surface is a [Textual](https://textual.textualize.io/) terminal UI with Shift+Tab mode switching, streaming agent activity, mode-aware session resume, and Markdown artifact preview. The same agent stack is available as a one-shot CLI (`midas`) and as a Python library. Supporting systems include DuckDuckGo search with Camoufox page rendering, Screener and signals provider scrapers, NSE/market-data adapters, optional Redis tool caching, and Ollama-backed compression for scraped text and concall transcripts. Research runs write durable artifacts under `output/`; TUI sessions isolate each agent workspace and store conversation history in SQLite.
+The interactive surface is a [Textual](https://textual.textualize.io/) terminal UI with Shift+Tab mode switching, streaming agent activity, mode-aware session resume, and Markdown artifact preview. The same agent stack is available as a one-shot CLI (`midas`) and as a Python library. Supporting systems include DuckDuckGo search with Camoufox page rendering, optional local market-data adapters, exchange/market-structure tools, optional Redis tool caching, and Ollama-backed compression for fetched page text and transcript material. Research runs write durable artifacts under `output/`; TUI sessions isolate each agent workspace and store conversation history in SQLite.
 
 ## Features
 
@@ -29,19 +29,19 @@ The interactive surface is a [Textual](https://textual.textualize.io/) terminal 
 | --- | --- |
 | **Two research modes** | Deep Wide Research Agent for staged universe screening and reporting; Single Stock Research Agent for narrow, investment-grade diligence on exactly one company. |
 | **Investment-horizon decision standard** | One-to-two-year owner-style analysis that separates business quality, valuation, evidence confidence, governance, and liquidity; zero to three final selections; incomplete work is labeled rather than forced. |
-| **Indian market evidence tools** | Screener fundamentals/statements/peers/charts/concalls, signals provider consensus/SWOT/superstars/ASM-GSM/FII-DII, NSE constituents and filings, quotes, trading history, market scans, event calendars, deals, derivatives snapshots, institutional flows, and Nifty/MCX context. |
-| **Grounded web research** | Search → Camoufox/HTTP scrape → local main-text extraction → Ollama compression of scraped corpus only, with full cleaned text retained on successful sources. |
+| **Indian market evidence tools** | Company fundamentals and statements, peer context, consensus/signal snapshots, exchange constituents and filings, quotes, trading history, market scans, event calendars, deals, derivatives snapshots, institutional flows, and major index/commodity context. |
+| **Grounded web research** | Search → Camoufox/HTTP fetch → local main-text extraction → Ollama compression of fetched corpus only, with full cleaned text retained on successful sources. |
 | **Artifact-backed reporting** | Ten required Markdown research files, validated A–J final report structure, HTML compilation, and Chromium-based PDF generation via `generate_report`. |
 | **Interactive TUI** | Codex-style terminal session with Shift+Tab research-mode switching, live agent highlighting, tool activity, todos, token usage, Markdown preview, and mode-aware `/new` / `/sessions` / `/resume`. |
-| **Library scrapers** | Synchronous and async public APIs for company scrape (`scrape_company*`), signals provider signals (`scrape_signals*`), and web search (`web_search` / `search_and_scrape`) returning frozen Pydantic models. |
-| **MCP market tools** | Standalone stdio MCP server (`midas-mcp`) exposing Screener, signals provider, and NSE market-info tools for external hosts such as Codex (excludes web search, X, and charts). |
-| **Resilience and isolation** | Per-source single-flight tool gates, sequential scrape/market-data policy, fail-open Redis cache for successful tool results, and per-session filesystem workspaces under `output/<session-id>/`. |
+| **Library APIs** | Synchronous and async helpers for web research (`web_search` / `search_and_scrape`) and optional local company/market signal adapters when present, returning frozen Pydantic models. |
+| **MCP market tools** | Standalone stdio MCP server (`midas-mcp`) exposing market-info tools for external hosts such as Codex (excludes web search, X, and charts). |
+| **Resilience and isolation** | Per-source single-flight tool gates, sequential market-data policy, fail-open Redis cache for successful tool results, and per-session filesystem workspaces under `output/<session-id>/`. |
 | **Chart artifacts** | Agent tools for bar, line, area, pie, stacked-bar, scatter, and heatmap PNGs written under `output/charts/` with embed paths returned to the model. |
 
 > [!NOTE]
-> **Implemented:** staged multi-agent workflow, CLI and Textual TUI, research tool suite, Screener/signals provider scrapers, web search pipeline, chart tools, session store, report validation/PDF rendering, and a market-info MCP server (`midas-mcp`).
+> **Implemented:** staged multi-agent workflow, CLI and Textual TUI, research tool suite, web research pipeline, chart tools, session store, report validation/PDF rendering, and a market-info MCP server (`midas-mcp`).
 >
-> **Optional / environment-dependent:** Redis tool cache (`MIDAS_REDIS_URL` / `REDIS_URL`), `twitter_search` via local `grok` CLI (two calls per agent instance), Camoufox browser smoke tests (`MIDAS_RUN_INTEGRATION=1`), and Chromium/Chrome for PDF export (`REPORT_PDF_BROWSER`).
+> **Optional / environment-dependent:** Redis tool cache (`MIDAS_REDIS_URL` / `REDIS_URL`), `twitter_search` via local `grok` CLI (two calls per agent instance), Camoufox browser smoke tests (`MIDAS_RUN_INTEGRATION=1`), Chromium/Chrome for PDF export (`REPORT_PDF_BROWSER`), and any private local market-data adapters you wire yourself.
 >
 > **Present but not wired into the main tool list:** `get_image_model()` (OpenAI vision helper documented for a `search_image` flow) is defined in `model.py` and is not registered among `MIDAS_TOOLS`.
 >
@@ -67,7 +67,7 @@ flowchart LR
   N --> O[10 Report + PDF]
 ```
 
-Stages run sequentially because upstream data tools are single-flight per source (Screener, signals provider, NSE, web, X). Scraping and market-data tools are intended to run one at a time; only `web_research` is exempt from that cross-tool sequencing rule. Successful expensive tool responses can be cached in Redis for 24 hours; errors are never cached, and Redis failures fall back to uncached execution. CLI runs land under `output/research/<topic>/<timestamp>/`; TUI runs land under `output/<session-id>/research/<topic>/<timestamp>/`.
+Stages run sequentially because upstream data tools are single-flight per source (fundamentals, signals, exchange, web, X). Market-data tools are intended to run one at a time; only `web_research` is exempt from that cross-tool sequencing rule. Successful expensive tool responses can be cached in Redis for 24 hours; errors are never cached, and Redis failures fall back to uncached execution. CLI runs land under `output/research/<topic>/<timestamp>/`; TUI runs land under `output/<session-id>/research/<topic>/<timestamp>/`.
 
 ## Research information architecture
 
@@ -115,20 +115,19 @@ flowchart TB
   subgraph domain [Domain and tools]
     TOOLS[MIDAS_TOOLS + chart tools]
     PIPE[Web search pipeline]
-    SCR[Screener scraper]
-    TL[signals provider scraper]
-    MD[market_data adapters]
+    MDA[Local market-data adapters]
+    MD[Exchange / market adapters]
     REP[generate_report]
     SESS[SessionStore SQLite]
   end
 
   subgraph external [External systems]
     DDGS[DuckDuckGo search]
-    CAM[Camoufox / HTTP scrape]
+    CAM[Camoufox / HTTP fetch]
     OLL[Ollama compression]
     DS[OpenRouter models]
-    NSE[NSE and market providers]
-    WEB[Screener / signals provider / web]
+    EXCH[Exchange and market providers]
+    WEB[Public web sources]
     REDIS[(Optional Redis)]
     CHROME[Chrome or Chromium]
   end
@@ -138,10 +137,8 @@ flowchart TB
   TUI --> STOCK
   TUI --> SESS
   LIB --> PIPE
-  LIB --> SCR
-  LIB --> TL
-  MCP --> SCR
-  MCP --> TL
+  LIB --> MDA
+  MCP --> MDA
   MCP --> MD
   LEAD --> SUB
   LEAD --> TOOLS
@@ -151,16 +148,14 @@ flowchart TB
   SUB --> TOOLS
   SUB --> FS
   TOOLS --> PIPE
-  TOOLS --> SCR
-  TOOLS --> TL
+  TOOLS --> MDA
   TOOLS --> MD
   TOOLS --> REDIS
   PIPE --> DDGS
   PIPE --> CAM
   PIPE --> OLL
-  SCR --> WEB
-  TL --> WEB
-  MD --> NSE
+  MDA --> WEB
+  MD --> EXCH
   LEAD --> DS
   STOCK --> DS
   SUB --> DS
@@ -172,10 +167,10 @@ flowchart TB
 - **Agent construction** — `create_midas_agent()` remains the Deep Wide compatibility factory; `create_single_stock_agent()` builds the focused one-company graph; `create_research_agent()` dispatches the TUI mode. Both use shared `MIDAS_TOOLS` and an isolated virtual filesystem rooted at `output/<agent_id>/`.
 - **Model split** — lead/research/adversarial use OpenRouter `openai/gpt-5.6-luna` (medium reasoning, OpenAI preferred); deep-research and report writing use the same model with high reasoning. Scraped-text and concall compression use a local OpenAI-compatible Ollama endpoint (`gpt-oss:120b-cloud` by default).
 - **Tool contracts** — research tools return compact JSON directly to the calling agent. Duplicate prose/structured representations are omitted, transcript summaries and web compression are bounded, and detailed follow-up tools remain available when a compact market listing is insufficient. Per-source concurrency gates return `busy` immediately when another call from the same source is active.
-- **Token controls** — normalized tool arguments share an in-process/Redis cache with source-appropriate TTLs, so repeated reads avoid scraping and avoid re-injecting alternate copies of the same payload.
+- **Token controls** — normalized tool arguments share an in-process/Redis cache with source-appropriate TTLs, so repeated reads avoid redundant fetches and avoid re-injecting alternate copies of the same payload.
 - **Artifact contract** — report compilation validates the ten research files, lints A–J headings and table width, embeds local images, and prints PDF through a Chromium-based browser.
 - **Session ownership** — the TUI owns `SessionStore` at interaction boundaries; each turn sets `AGENT_OUTPUT_DIRECTORY` so host-side tools write into the isolated session tree.
-- **Failure handling** — partial scrape failures do not abort web search when at least one page succeeds; missing API keys surface as setup errors rather than silent runs; incomplete tool-call batches in the TUI clear conversation state while leaving generated files intact.
+- **Failure handling** — partial page-fetch failures do not abort web search when at least one page succeeds; missing API keys surface as setup errors rather than silent runs; incomplete tool-call batches in the TUI clear conversation state while leaving generated files intact.
 
 ## Tech stack
 
@@ -187,8 +182,8 @@ flowchart TB
 | **Agents** | [DeepAgents](https://github.com/langchain-ai/deepagents), LangGraph streaming, LangChain tools |
 | **MCP** | [Model Context Protocol](https://modelcontextprotocol.io/) Python SDK (`mcp` FastMCP) for external hosts |
 | **Models** | [OpenRouter](https://openrouter.ai/) via `langchain-openrouter` (`openai/gpt-5.6-luna`, OpenAI preferred); Ollama via OpenAI-compatible `ChatOpenAI` for compression |
-| **Search and scrape** | [ddgs](https://pypi.org/project/ddgs/), [Camoufox](https://camoufox.com/), httpx, BeautifulSoup/lxml, [trafilatura](https://trafilatura.readthedocs.io/) |
-| **Market data** | fundamentals provider and signals provider HTML scrapers; `nse`, `nselib`, `indian-market-data`, cloudscraper |
+| **Search and fetch** | [ddgs](https://pypi.org/project/ddgs/), [Camoufox](https://camoufox.com/), httpx, BeautifulSoup/lxml, [trafilatura](https://trafilatura.readthedocs.io/) |
+| **Market data** | Optional local fundamentals/signal adapters; exchange libraries such as `nse`, `nselib`, `indian-market-data`, and related HTTP helpers |
 | **Persistence** | Run artifacts on disk; TUI sessions in SQLite (`output/.midas-sessions.sqlite3`); optional Redis tool cache |
 | **Reporting** | Python-Markdown → HTML → Chromium headless PDF |
 | **Charts** | Pillow-generated PNG chart tools |
@@ -201,18 +196,14 @@ midas/
 ├── pyproject.toml                 # Package metadata, scripts, pytest/ruff config
 ├── .env.example                   # Ollama endpoint template
 ├── examples/
-│   ├── web_search.py              # Search → scrape → compress demo
-│   ├── scrape_fundamentals.py         # Screener company CLI example
-│   └── scrape_signals.py        # signals provider signals CLI example
+│   └── web_search.py              # Search → fetch → compress demo
 ├── src/midas/
 │   ├── cli.py                     # `midas` one-shot research entrypoint
 │   ├── mcp_server.py              # `midas-mcp` stdio MCP server (market tools)
-│   ├── pipeline.py                # Web search, Camoufox scrape, Ollama compress
-│   ├── market_data.py             # Normalized NSE/market provider adapters
+│   ├── pipeline.py                # Web search, Camoufox fetch, Ollama compress
+│   ├── market_data.py             # Normalized exchange/market provider adapters
 │   ├── sessions.py                # SQLite session store for the TUI
 │   ├── models.py                  # SearchResult / SourceResult contracts
-│   ├── screener/                  # fundamentals provider client, parser, charts, concalls
-│   ├── trendlyne/                 # signals provider free-signal scrapers
 │   ├── tui/
 │   │   ├── app.py                 # Textual application shell
 │   │   └── events.py              # Agent stream → UI event mapping
@@ -240,7 +231,7 @@ midas/
   - `OPENROUTER_API_KEY` — required for the research agents (CLI refuses to start without it).
   - `OPENAI_API_KEY` — expected by the TUI setup check for a complete environment; also accepted as a fallback credential string for the Ollama OpenAI-compatible client.
 - **PDF rendering:** Google Chrome or Chromium on `PATH`, the default macOS Chrome path, or `REPORT_PDF_BROWSER`.
-- **Network access:** required for search, scrapers, and market-data tools.
+- **Network access:** required for search and market-data tools.
 - **Optional:** Redis for tool caching; `grok` CLI on `PATH` for `twitter_search`.
 
 Local development does not require a deployed service. Physical-device or mobile targets are not applicable—this is a terminal and library project. Integration tests that hit the live web need both network access and an installed Camoufox browser.
@@ -301,16 +292,16 @@ uv run midas-tui
 
 ### MCP server (Codex and other hosts)
 
-The same Screener / signals provider / NSE market-info tools used by the research agents are available as a standalone [MCP](https://modelcontextprotocol.io/) server. Web search, X/Twitter search, chart tools, and agent UI helpers are **not** included.
+The same market-info tools used by the research agents are available as a standalone [MCP](https://modelcontextprotocol.io/) server. Web search, X/Twitter search, chart tools, and agent UI helpers are **not** included.
 
 ```bash
 uv run midas-mcp
 # equivalent: uv run python -m midas.mcp_server
 ```
 
-**Tools exposed:** `company_fundamentals`, `earnings_transcripts`, `market_signals`, `nse_list_index`, `nse_company_filings`, `nse_equity_snapshot`, `equity_trading_history`, `nse_market_scan`, `equity_event_calendar`, `exchange_deals`, `nse_derivatives_snapshot`, `institutional_activity`, `india_market_context`.
+**Tools exposed (illustrative):** company fundamentals, transcript helpers, market-signal snapshots, index constituents, company filings, equity snapshots, trading history, market scans, event calendars, exchange deals, derivatives snapshots, institutional activity, and India market context. Exact tool names are those registered by `midas-mcp` at runtime.
 
-**Concurrency:** same single-flight policy as the in-app tools. Screener, signals provider, and NSE each allow only one active call; the MCP adapter also serializes the full market-tool set so parallel host calls get a non-blocking JSON `status: "busy"` / `retryable: true` response instead of overlapping scrapes.
+**Concurrency:** same single-flight policy as the in-app tools. Each upstream source allows only one active call; the MCP adapter also serializes the full market-tool set so parallel host calls get a non-blocking JSON `status: "busy"` / `retryable: true` response instead of overlapping requests.
 
 **Codex** — add to `~/.codex/config.toml` (use the absolute path to this repo):
 
@@ -318,11 +309,11 @@ uv run midas-mcp
 [mcp_servers.midas]
 command = "uv"
 args = ["run", "--directory", "/absolute/path/to/Midas", "midas-mcp"]
-# Scrapes can exceed the default tool timeout.
+# Market tools can exceed the default tool timeout.
 tool_timeout_sec = 180
 ```
 
-After editing config, restart Codex (CLI or IDE). No `OPENROUTER_API_KEY` is required for the MCP server itself; network access is required for scrapers. Optional Redis caching (`MIDAS_REDIS_URL` / `REDIS_URL`) and Ollama (`OLLAMA_BASE_URL`) apply the same way as in-app tools—Ollama is only needed when calling `earnings_transcripts` with summarization enabled.
+After editing config, restart Codex (CLI or IDE). No `OPENROUTER_API_KEY` is required for the MCP server itself; network access is required for market tools. Optional Redis caching (`MIDAS_REDIS_URL` / `REDIS_URL`) and Ollama (`OLLAMA_BASE_URL`) apply the same way as in-app tools—Ollama is only needed when transcript summarization is enabled.
 
 **Claude Desktop / Cursor-style hosts** use the same stdio command:
 
@@ -340,16 +331,10 @@ After editing config, restart Codex (CLI or IDE). No `OPENROUTER_API_KEY` is req
 Library usage:
 
 ```python
-from midas import web_search, scrape_company_sync, scrape_signals_sync
+from midas import web_search
 
 result = web_search("Recent developments in sodium-ion batteries", max_results=5)
 print(result.compressed)
-
-company = scrape_company_sync("RELIANCE", include_chart=True, include_concalls=True)
-print(company.agent_brief())
-
-signals = scrape_signals_sync("TCS")
-print(signals.agent_brief())
 ```
 
 Agent entrypoint:
@@ -363,7 +348,7 @@ answer = await agent.ainvoke(
 ```
 
 > [!IMPORTANT]
-> Do not commit real API keys. `.env` is gitignored. Replace any local development credentials before sharing the environment. Scrapers should be used with polite request volume against third-party sites.
+> Do not commit real API keys. `.env` is gitignored. Replace any local development credentials before sharing the environment. Respect third-party site terms, robots rules, and rate limits when fetching external data.
 
 ### TUI controls
 
@@ -399,7 +384,7 @@ uv run pytest
 MIDAS_RUN_INTEGRATION=1 uv run pytest -m integration
 ```
 
-The suite covers pipeline models and cleaning, Screener/signals provider parsers and scrapers, market-data adapters, DeepAgent tools/cache/charts/workflow contracts, reporting validation, CLI behavior, session storage, and TUI event/app wiring. Integration tests are opt-in so default CI-style runs stay offline.
+The suite covers pipeline models and cleaning, market-data adapters, DeepAgent tools/cache/charts/workflow contracts, reporting validation, CLI behavior, session storage, and TUI event/app wiring. Integration tests are opt-in so default CI-style runs stay offline.
 
 ## Roadmap
 
@@ -407,6 +392,18 @@ The suite covers pipeline models and cleaning, Screener/signals provider parsers
 - Expand `.env.example` beyond Ollama to document `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, Redis, chart directory, and PDF browser settings used by the application.
 - Harden long multi-agent runs against provider tool-call batch failures already mitigated in the TUI by clearing incomplete conversation state.
 - Continue equal-depth batching ergonomics for large admitted sets without lowering the fixed research packet.
+
+## Disclaimer
+
+**Not investment advice.** Midas is research software for educational and informational use. Outputs are automated research assessments for a stated analysis cut-off. They are **not** personalized investment recommendations, solicitations to buy or sell securities, portfolio management, brokerage services, or financial, legal, or tax advice. You are solely responsible for any investment decisions and for complying with laws that apply to you.
+
+**No warranties; use at your own risk.** The software and any data it retrieves are provided “as is,” without warranty of accuracy, completeness, timeliness, or fitness for a particular purpose. Market data can be delayed, incomplete, misparsed, or wrong. Do not rely on tool output as a sole basis for trading or compliance decisions.
+
+**Third-party data and terms.** Midas may fetch information from public web pages, exchanges, and other third-party services. Those sources are not affiliated with, endorsed by, or sponsored by this project. You must comply with each provider’s terms of service, robots rules, rate limits, and applicable law. This repository does **not** grant any license to third-party content, trademarks, or proprietary datasets. Prefer official APIs and licensed data feeds where available.
+
+**No affiliation.** Names of exchanges, indices, companies, or products mentioned in documentation or examples are for identification only and remain the property of their owners.
+
+**Liability.** To the maximum extent permitted by law, authors and contributors are not liable for any loss or damage arising from use of this software or reliance on its outputs—including trading losses, data inaccuracies, or account restrictions imposed by third parties.
 
 ## License
 

@@ -21,9 +21,9 @@ from .fundamentals import (
 )
 from .signals import (
     StockNotFoundError,
-    signals providerError,
-    signals providerScraper,
-    signals providerSignalsResult,
+    SignalsError,
+    SignalsScraper,
+    MarketSignalsResult,
     scrape_signals,
     scrape_signals_sync,
 )
@@ -41,9 +41,9 @@ __all__ = [
     "SearchResult",
     "SourceResult",
     "StockNotFoundError",
-    "signals providerError",
-    "signals providerScraper",
-    "signals providerSignalsResult",
+    "SignalsError",
+    "SignalsScraper",
+    "MarketSignalsResult",
     "scrape_company",
     "scrape_company_sync",
     "scrape_signals",

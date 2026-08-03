@@ -70,9 +70,9 @@ async def test_mcp_tool_list_matches_market_info_tools() -> None:
     tools = await server.list_tools()
     names = {tool.name for tool in tools}
     assert names == {tool.name for tool in MARKET_INFO_TOOLS}
-    screener = next(tool for tool in tools if tool.name == "company_fundamentals")
-    assert screener.description
-    assert "symbol" in (fundamentals providerputSchema or {}).get("properties", {})
+    fundamentals = next(tool for tool in tools if tool.name == "company_fundamentals")
+    assert fundamentals.description
+    assert "symbol" in (fundamentals.inputSchema or {}).get("properties", {})
 
 
 @pytest.mark.asyncio
@@ -88,7 +88,7 @@ async def test_mcp_company_fundamentals_call_uses_underlying_tool(
     )
 
     page = CompanyPage(
-        url="https://www.fundamentals provider/company/TCS/",
+        url="https://example.com/fundamentals/company/TCS/",
         symbol="TCS",
         basis=ReportingBasis.STANDALONE,
         profile=CompanyProfile(name="Tata Consultancy Services Ltd", symbol="TCS"),
@@ -135,7 +135,7 @@ async def test_mcp_rejects_overlapping_market_tool_calls(
         started.set()
         await release.wait()
         page = CompanyPage(
-            url=f"https://www.fundamentals provider/company/{symbol}/",
+            url=f"https://example.com/fundamentals/company/{symbol}/",
             symbol=symbol,
             basis=ReportingBasis.STANDALONE,
             profile=CompanyProfile(name=symbol, symbol=symbol),
@@ -159,7 +159,7 @@ async def test_mcp_rejects_overlapping_market_tool_calls(
     first = asyncio.create_task(server.call_tool("company_fundamentals", {"symbol": "TCS"}))
     await started.wait()
 
-    # Same source while screener is active.
+    # Same source while fundamentals is active.
     same_source = json.loads(
         _tool_payload_text(await server.call_tool("earnings_transcripts", {"symbol": "INFY"}))
     )

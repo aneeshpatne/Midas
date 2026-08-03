@@ -35,7 +35,7 @@ from ..market_data import (
 )
 from ..pipeline import MidasError, search_and_scrape
 from ..fundamentals import FundamentalsError, scrape_company
-from ..signals import signals providerError, scrape_signals
+from ..signals import SignalsError, scrape_signals
 from .cache import redis_cached_tool
 from .charts import (  # noqa: F401
     CHART_TOOLS,
@@ -79,8 +79,8 @@ _MARKET_TOOL_ERRORS = (
 ai_log = logging.getLogger(__name__)
 
 _SOURCE_WEB = "web"
-_SOURCE_FUNDAMENTALS = "screener"
-_SOURCE_SIGNALS = "trendlyne"
+_SOURCE_FUNDAMENTALS = "fundamentals"
+_SOURCE_SIGNALS = "signals"
 _SOURCE_NSE = "nse"
 _SOURCE_X = "x"
 
@@ -499,7 +499,7 @@ twitter_search = build_twitter_search_tool()
 async def web_research(query: str, max_results: int = 5) -> str:
     """Search the public web and summarize only the pages Midas successfully scraped.
 
-    Use for recent news, events, or facts not available in Screener. The result
+    Use for recent news, events, or facts not available from company fundamentals tools. The result
     includes a grounded summary plus source URLs and scrape statuses.
 
     Args:
@@ -535,17 +535,17 @@ async def web_research(query: str, max_results: int = 5) -> str:
 @_source_limited(_SOURCE_FUNDAMENTALS, "company_fundamentals")
 @redis_cached_tool("company_fundamentals", ttl_seconds=_CACHE_TTL_COMPANY_SECONDS)
 async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
-    """Fetch normal fundamentals provider company fundamentals and market data for an NSE symbol.
+    """Fetch company fundamentals and market data for an NSE symbol.
 
     Use for financial statements, ratios, peers, shareholding, company profile, and
     announcements. This intentionally does not download earnings-call transcripts;
     use ``earnings_transcripts`` when the user needs management commentary.
 
     Args:
-        symbol: NSE/Screener trading symbol, for example RELIANCE, TCS, or INFY.
+        symbol: NSE trading symbol, for example RELIANCE, TCS, or INFY.
         consolidated: Whether to request consolidated rather than standalone figures.
     """
-    ai_log.info("Fetching Screener fundamentals for %s", symbol)
+    ai_log.info("Fetching company fundamentals for %s", symbol)
     try:
         result = await scrape_company(
             symbol,
@@ -582,13 +582,13 @@ async def earnings_transcripts(
     limit: int = 2,
     summarize: bool = True,
 ) -> str:
-    """Download and extract recent Screener-linked earnings-call transcripts.
+    """Download and extract recent earnings-call transcripts for a company.
 
     Use this separately from normal company research when the question needs
     management guidance, demand commentary, margins, capex, risks, or Q&A.
 
     Args:
-        symbol: NSE/Screener trading symbol, for example RELIANCE, TCS, or INFY.
+        symbol: NSE trading symbol, for example RELIANCE, TCS, or INFY.
         consolidated: Whether to use the consolidated company page for concall links.
         limit: Number of latest unique transcript PDFs to process, from 1 to 5.
         summarize: Summarize extracted PDFs with the configured Ollama model.
@@ -596,7 +596,7 @@ async def earnings_transcripts(
     if not 1 <= limit <= 5:
         return _json({"ok": False, "symbol": symbol, "error": "limit must be between 1 and 5"})
 
-    ai_log.info("Fetching the latest %d Screener concalls for %s", limit, symbol)
+    ai_log.info("Fetching the latest %d earnings transcripts for %s", limit, symbol)
     try:
         result = await scrape_company(
             symbol,
@@ -643,7 +643,7 @@ async def earnings_transcripts(
 @_source_limited(_SOURCE_SIGNALS, "market_signals")
 @redis_cached_tool("market_signals", ttl_seconds=_CACHE_TTL_COMPANY_SECONDS)
 async def market_signals(symbol: str) -> str:
-    """Fetch high-impact free signals provider signals that Screener does not cover well.
+    """Fetch high-impact free market signals that company fundamentals tools do not cover well.
 
     Use after or alongside ``company_fundamentals`` for:
     - analyst consensus price target (headline)
@@ -652,16 +652,16 @@ async def market_signals(symbol: str) -> str:
     - ASM/GSM surveillance risk flag
     - latest FII/DII cash-segment flow snapshot
 
-    Do not use this as a replacement for Screener fundamentals (statements,
-    ratios, peers, concalls). Prefer Screener for those.
+    Do not use this as a replacement for company fundamentals (statements,
+    ratios, peers, concalls). Prefer company_fundamentals for those.
 
     Args:
         symbol: NSE trading symbol, for example TCS, TITAN, or INFY.
     """
-    ai_log.info("Fetching signals provider signals for %s", symbol)
+    ai_log.info("Fetching market signals for %s", symbol)
     try:
         result = await scrape_signals(symbol)
-    except (signals providerError, ValueError) as exc:
+    except (SignalsError, ValueError) as exc:
         return _json({"ok": False, "symbol": symbol, "error": str(exc)})
 
     return _json(
@@ -786,7 +786,7 @@ def nse_equity_snapshot(symbol: str) -> str:
     """Fetch a live NSE equity quote and security identity snapshot.
 
     Use for current price, OHLC, volume, delivery, price bands, 52-week context,
-    security status, ISIN, and F&O/ETF classification. Use Screener instead for
+    security status, ISIN, and F&O/ETF classification. Use company_fundamentals instead for
     financial statements, ratios, and peers.
 
     Args:
@@ -1046,8 +1046,8 @@ def india_market_context(
 # Scrape / market-data tools only (no web search, X, charts, or agent UI helpers).
 # Exposed both to DeepAgents and to the standalone MCP server for external hosts.
 #
-# Each tool already has a per-upstream-source single-flight gate (screener /
-# trendlyne / nse). The MCP server additionally serializes the whole set so
+# Each tool already has a per-upstream-source single-flight gate (fundamentals /
+# signals / nse). The MCP server additionally serializes the whole set so
 # external hosts that fire tools in parallel get the same sequential policy
 # the in-app agents are instructed to follow.
 MARKET_INFO_TOOLS = (

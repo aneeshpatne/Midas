@@ -35,12 +35,12 @@ _AGENT_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{7,127}$")
 MIDAS_TOOL_GUIDANCE = """Use research tools to gather evidence before factual claims.
 Start with the complete universe and primary/company evidence: use nse_list_index for
 live NSE constituents and methodology context; nse_company_filings for exchange
-announcements, results, shareholding, governance and corporate actions; Screener for
+announcements, results, shareholding, governance and corporate actions; company_fundamentals for
 long financial history, statements, peers and concalls; credit-rating and regulatory
 evidence when available; and web_research for annual reports, official disclosures,
 industry evidence, governance history and external facts.
 
-Use signals provider consensus/signals, live quotes, trading history, market scans, event
+Use market_signals, live quotes, trading history, market scans, event
 calendars, bulk/block/short deals, derivatives positioning, institutional flows,
 market context and Twitter only as supplementary valuation or monitoring context.
 Upcoming results, consensus upside, broker changes, flows, technicals, price action,
@@ -90,15 +90,15 @@ for a material monitoring question that cannot be answered from grounded sources
 Treat posts as unverified discussion unless corroborated, never use popularity as
 investment evidence, and never call the tool after its budget is exhausted.
 
-Source-backed tools are single-flight by source: Screener tools share one slot,
-signals provider tools share one slot, NSE-backed tools share one slot, web_research has its
+Source-backed tools are single-flight by source: fundamentals tools share one slot,
+signals tools share one slot, NSE-backed tools share one slot, web_research has its
 own slot, and twitter_search has its own slot. If a tool returns status "busy", it
 returned immediately because another tool from that source is still running. Wait for
 that request to finish, then retry the tool yourself; do not start another tool from
 the same source in the meantime.
 
 Run all scraping and market-data tools sequentially, never in parallel. This includes
-Screener, signals provider, NSE, trading-history, calendar, deals, derivatives,
+company_fundamentals, market_signals, NSE, trading-history, calendar, deals, derivatives,
 institutional-activity, and market-context tools. Complete one such call and receive
 its tool result before starting the next. Only web_research calls are exempt from
 this cross-tool sequencing rule, although web_research's own source gate and any busy

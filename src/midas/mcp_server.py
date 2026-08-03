@@ -1,6 +1,6 @@
 """Standalone MCP server for Midas market-info scrape tools.
 
-Exposes Screener, signals provider, and NSE market-data tools over the Model Context
+Exposes company fundamentals, market-signal, and NSE market-data tools over the Model Context
 Protocol so hosts such as Codex, Claude Desktop, or Cursor can call them without
 running the full Midas research agent.
 
@@ -9,7 +9,7 @@ are intentionally omitted.
 
 Concurrency matches the in-app research tools:
 
-* **Per source** — Screener, signals provider, and NSE each allow only one active call
+* **Per source** — fundamentals, signals, and NSE each allow only one active call
   (already enforced on the underlying tool implementations).
 * **Across market tools** — the MCP adapter adds a process-wide sequential gate
   so hosts that fire tools in parallel get a non-blocking ``busy`` JSON response
@@ -44,20 +44,20 @@ from .deepagents.tools import (
 )
 
 _SERVER_INSTRUCTIONS = """\
-Indian equity market-information tools from Midas (fundamentals provider, signals provider, NSE).
+Indian equity market-information tools from Midas (fundamentals, signals, NSE).
 
 Use these for fundamentals, filings, quotes, trading history, index constituents,
 event calendars, deals, derivatives snapshots, institutional flows, and
 cross-asset market context. All tools return compact JSON strings with an
 ``ok`` field; check ``ok`` before trusting the payload.
 
-Concurrency: run market tools one at a time. Screener, signals provider, and NSE each
+Concurrency: run market tools one at a time. Fundamentals, signals, and NSE each
 also have a single-flight source gate. If a tool returns status "busy" with
 retryable true, wait for the in-flight call to finish, then retry; do not start
 another market or same-source tool while one is active.
 
 Not included: general web search, social/X search, or chart generation.
-Prefer Screener for statements/ratios/peers; signals provider for consensus/SWOT/
+Prefer company_fundamentals for statements/ratios/peers; market_signals for consensus/SWOT/
 superstars/ASM; NSE tools for live quotes, filings, and market structure.
 """
 
