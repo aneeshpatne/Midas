@@ -7,3 +7,9 @@ dist/
 *.py[cod]
 output/
 output/research/
+# Midas DB local SQLite (paper portfolios + research runs)
+midas.db
+midas.db-wal
+midas.db-shm
+*.db-wal
+*.db-shm
