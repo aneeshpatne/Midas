@@ -15,6 +15,7 @@ from .charts import (
     generate_scatter_chart,
     generate_stacked_bar_chart,
 )
+from .db_tools import MIDAS_DB_TOOLS, ensure_midas_db
 from .reporting import REPORT_TOOLS, generate_report
 from .tools import (
     MARKET_INFO_TOOLS,
@@ -23,23 +24,25 @@ from .tools import (
     McxCommodity,
     NseIndex,
     build_twitter_search_tool,
-    india_market_context,
-    institutional_activity,
-    nse_company_filings,
-    nse_list_index,
     company_fundamentals,
     earnings_transcripts,
-    send_update,
+    india_market_context,
+    institutional_activity,
     market_signals,
+    nse_company_filings,
+    nse_list_index,
+    send_update,
     twitter_search,
     web_research,
 )
 
 __all__ = [
     "MARKET_INFO_TOOLS",
+    "MIDAS_DB_TOOLS",
     "MIDAS_TOOLS",
     "REPORT_TOOLS",
     "CHART_TOOLS",
+    "ensure_midas_db",
     "ChartDatum",
     "ChartSeries",
     "HeatmapCell",

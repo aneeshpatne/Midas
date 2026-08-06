@@ -52,6 +52,7 @@ from .charts import (  # noqa: F401
     generate_scatter_chart,
     generate_stacked_bar_chart,
 )
+from .db_tools import MIDAS_DB_TOOLS
 
 TWITTER_SEARCH_MAX_CALLS = 2
 """Default maximum number of Grok/X searches available to one agent."""
@@ -1075,4 +1076,5 @@ MIDAS_TOOLS = (
     *MARKET_INFO_TOOLS,
     twitter_search,
     *CHART_TOOLS,
+    *MIDAS_DB_TOOLS,
 )
