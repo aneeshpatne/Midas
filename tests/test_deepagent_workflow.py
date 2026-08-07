@@ -1,3 +1,4 @@
+from midas.deepagents.db_tools import MIDAS_DB_TOOLS
 from midas.deepagents.modes import (
     DEEP_WIDE_ROOT_AGENT_ID,
     SINGLE_STOCK_ROOT_AGENT_ID,
@@ -6,42 +7,41 @@ from midas.deepagents.modes import (
 from midas.deepagents.prompts import (
     ADVERSARIAL_AGENT_PROMPT,
     DEEP_RESEARCH_AGENT_PROMPT,
-    FOCUSED_STOCK_RESEARCH_ARTIFACTS,
+    FOCUSED_STOCK_EVIDENCE_TYPES,
     FOCUSED_STOCK_SYSTEM_PROMPT,
     INVESTMENT_GRADE_SELECTION_STANDARD,
     LONG_HORIZON_RESEARCH_POLICY,
     MIDAS_PRIMARY_SYSTEM_PROMPT,
     REPORT_AGENT_PROMPT,
-    REQUIRED_RESEARCH_ARTIFACTS,
+    REQUIRED_RESEARCH_EVIDENCE_TYPES,
     RESEARCH_AGENT_PROMPT,
     SCORING_RUBRIC,
     SOURCE_AND_ARTIFACT_RULES,
 )
-from midas.deepagents.reporting import REPORT_TOOLS, generate_report
 from midas.deepagents.tools import MIDAS_TOOLS
 
 
-def test_research_artifact_contract_is_complete_and_ordered() -> None:
-    assert REQUIRED_RESEARCH_ARTIFACTS == (
-        "00_mandate.md",
-        "01_universe.md",
-        "02_primary_research.md",
-        "03_primary_shortlist.md",
-        "04_adversary_independent.md",
-        "05_adversary_critique.md",
-        "06_deep_dive_shortlist.md",
-        "07_equal_depth_deep_research.md",
-        "08_finalist_bear_cases.md",
-        "09_investment_committee_decision.md",
+def test_research_evidence_contract_is_complete_and_ordered() -> None:
+    assert REQUIRED_RESEARCH_EVIDENCE_TYPES == (
+        "mandate",
+        "universe",
+        "primary_screen",
+        "primary_shortlist",
+        "adversary_independent",
+        "adversary_critique",
+        "deep_dive_shortlist",
+        "equal_depth",
+        "finalist_bear",
+        "ic_decision",
     )
 
 
-def test_focused_stock_artifact_contract_is_compact_and_ordered() -> None:
-    assert FOCUSED_STOCK_RESEARCH_ARTIFACTS == (
-        "00_stock_mandate.md",
-        "01_company_dossier.md",
-        "02_valuation_and_risk.md",
-        "03_focused_stock_conclusion.md",
+def test_focused_stock_evidence_contract_is_compact_and_ordered() -> None:
+    assert FOCUSED_STOCK_EVIDENCE_TYPES == (
+        "mandate",
+        "company_dossier",
+        "valuation_and_risk",
+        "focused_conclusion",
     )
 
 
@@ -55,7 +55,9 @@ def test_focused_stock_prompt_is_deep_but_rejects_broad_screening() -> None:
     assert "independent bear case" in prompt
     assert "Evidence Confidence" in prompt
     assert "Do not create a universe, shortlist, multi-company ranking" in prompt
-    assert "report-agent handoff, HTML or PDF" in prompt
+    assert "research_run_create" in prompt
+    assert "research_run_complete" in prompt
+    assert "PDF" in prompt
 
 
 def test_primary_prompt_preserves_staged_independent_review() -> None:
@@ -65,14 +67,16 @@ def test_primary_prompt_preserves_staged_independent_review() -> None:
     reconcile = prompt.index("Personally verify material disagreements")
     deep_research = prompt.index("Launch `deep-research-agent`")
     bear = prompt.index("FINALIST BEAR MODE")
-    committee = prompt.index("`09_investment_committee_decision.md`")
+    committee = prompt.index("ic_decision")
     report = prompt.index("Launch `report-agent`")
 
     assert independent < false_negative < reconcile < deep_research
     assert deep_research < bear < committee < report
     assert "Never mechanically average" in prompt
     assert "zero to three selections" in prompt
-    assert "Only report-agent" in MIDAS_PRIMARY_SYSTEM_PROMPT
+    assert "research_run_create" in MIDAS_PRIMARY_SYSTEM_PROMPT
+    assert "research_run_complete" in MIDAS_PRIMARY_SYSTEM_PROMPT
+    assert "PDF" in MIDAS_PRIMARY_SYSTEM_PROMPT
 
 
 def test_objectives_outputs_and_conclusions_are_separate() -> None:
@@ -391,6 +395,10 @@ def test_report_contract_has_a_to_j_and_twenty_five_qc_items() -> None:
         assert f"# {heading}" in REPORT_AGENT_PROMPT
     assert INVESTMENT_GRADE_SELECTION_STANDARD.count("\n25.") == 1
     assert "Incomplete for investment-decision reliance." in REPORT_AGENT_PROMPT
+    assert "research_run_set_report" in REPORT_AGENT_PROMPT
+    assert "research_run_complete" in REPORT_AGENT_PROMPT
+    assert "generate_report" in REPORT_AGENT_PROMPT  # explicitly forbidden
+    assert "Do **not** call" in REPORT_AGENT_PROMPT or "Do not call" in REPORT_AGENT_PROMPT
 
 
 def test_policy_is_shared_by_every_agent_role() -> None:
@@ -412,17 +420,24 @@ def test_policy_is_shared_by_every_agent_role() -> None:
 def test_adversarial_and_deep_research_roles_enforce_new_contract() -> None:
     adversarial = " ".join(ADVERSARIAL_AGENT_PROMPT.split())
     deep = " ".join(DEEP_RESEARCH_AGENT_PROMPT.split())
-    assert "Do not search the run directory for primary research" in adversarial
+    assert "Do not read primary_screen or primary_shortlist" in adversarial
     assert "five strongest excluded companies" in adversarial
     assert "including expensive high-quality names" in adversarial
     assert "every explicitly assigned evidence-qualified company" in deep
     assert "same minimum depth" in deep
     assert "do not narrow or broaden" in deep
     assert "two-method valuation" in deep
+    assert "equal_depth" in deep
 
 
-def test_report_role_declares_exactly_one_tool() -> None:
-    assert REPORT_TOOLS == (generate_report,)
+def test_db_tools_are_wired_into_midas_tools() -> None:
+    names = {item.name for item in MIDAS_TOOLS}
+    db_names = {item.name for item in MIDAS_DB_TOOLS}
+    assert db_names <= names
+    assert "research_run_create" in names
+    assert "research_evidence_append" in names
+    assert "research_run_complete" in names
+    assert "generate_report" not in names
 
 
 def test_research_tool_names_are_unique() -> None:
@@ -430,8 +445,35 @@ def test_research_tool_names_are_unique() -> None:
     assert len(names) == len(set(names))
 
 
-def test_research_roles_receive_expected_tools_and_guidance() -> None:
+def test_research_roles_receive_expected_tools_and_guidance(monkeypatch) -> None:
+    from midas.deepagents import deepagent
     from midas.deepagents.deepagent import MIDAS_TOOL_GUIDANCE, build_subagents
+
+    class _FakeReport:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.nodes = {
+                "tools": type(
+                    "N",
+                    (),
+                    {
+                        "bound": type(
+                            "B",
+                            (),
+                            {
+                                "tools_by_name": {
+                                    tool.name: tool for tool in kwargs.get("tools", ())
+                                }
+                            },
+                        )()
+                    },
+                )()
+            }
+
+    monkeypatch.setattr(deepagent, "get_research_model", lambda: object())
+    monkeypatch.setattr(deepagent, "get_deep_research_model", lambda: object())
+    monkeypatch.setattr(deepagent, "get_summarizer_model", lambda: object())
+    monkeypatch.setattr(deepagent, "create_deep_agent", lambda **kwargs: _FakeReport(**kwargs))
 
     by_name = {spec["name"]: spec for spec in build_subagents()}
 
@@ -439,12 +481,15 @@ def test_research_roles_receive_expected_tools_and_guidance() -> None:
     assert by_name["adversarial-agent"]["tools"] is MIDAS_TOOLS
     assert by_name["deep-research-agent"]["tools"] is MIDAS_TOOLS
     report_tool_node = by_name["report-agent"]["runnable"].nodes["tools"].bound
-    assert "generate_report" in report_tool_node.tools_by_name
-    assert {"read_file", "write_file"}.issubset(report_tool_node.tools_by_name)
+    assert "research_run_set_report" in report_tool_node.tools_by_name
+    assert "research_run_complete" in report_tool_node.tools_by_name
+    assert "generate_report" not in report_tool_node.tools_by_name
     assert "Run all scraping and market-data tools sequentially" in MIDAS_TOOL_GUIDANCE
     assert "Only web_research calls are exempt" in MIDAS_TOOL_GUIDANCE
     assert "median traded value/volume" in MIDAS_TOOL_GUIDANCE
     assert "government-security benchmark" in MIDAS_TOOL_GUIDANCE
+    assert "research_run_create" in MIDAS_TOOL_GUIDANCE
+    assert "Do not produce final PDF" in MIDAS_TOOL_GUIDANCE
 
 
 def test_deep_research_role_uses_its_dedicated_model_factory(monkeypatch) -> None:
@@ -488,8 +533,8 @@ def test_single_stock_factory_uses_deep_model_without_subagents(tmp_path, monkey
     assert captured["name"] == SINGLE_STOCK_ROOT_AGENT_ID
     assert "subagents" not in captured
     assert "generate_report" not in {tool.name for tool in captured["tools"]}
-    assert "/research" in captured["system_prompt"]
-    assert "/output/research" not in captured["system_prompt"]
+    assert "research_run_create" in captured["system_prompt"]
+    assert "research_run_complete" in captured["system_prompt"]
 
 
 def test_research_agent_dispatches_by_mode(monkeypatch) -> None:
