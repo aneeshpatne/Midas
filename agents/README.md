@@ -6,15 +6,19 @@ Portable Markdown instructions for Indian long-horizon equity research.
 
 Every agent and sub-agent: **`gpt-5.6-luna`** with **high** reasoning.
 
-## MCPs
+## Tools / MCPs
 
-Only the market-info MCPs from `src/midas/mcp_server.py` — listed in
-`shared/tool-guidance.md`. No other tools.
+See `shared/tool-guidance.md`:
+
+- **Market info** — `midas-mcp` / in-process scrape tools
+- **Midas DB** — `midas-db-mcp` / in-process DB tools (research runs + paper portfolios)
+
+DeepAgents load both via `MIDAS_TOOLS`.
 
 ## Deliverable
 
-**Markdown files only.** Each stage writes its named `.md` into a new run folder.
-No HTML/PDF.
+**Midas DB research runs** (evidence ledger + `report_md`). No required intermediate
+Markdown files and no final PDF/HTML.
 
 ## Layout
 
@@ -23,7 +27,7 @@ agents/
   README.md
   shared/
     long-horizon-policy.md    # research standard
-    tool-guidance.md          # only mcp_server.py MCP names
+    tool-guidance.md          # market + DB tools
   deep-wide/
     AGENTS.md                 # lead
     research-agent.md
@@ -31,21 +35,5 @@ agents/
     deep-research-agent.md
     report-agent.md
   single-stock/
-    AGENTS.md                 # merged one-company agent
+    AGENTS.md
 ```
-
-## Which agent
-
-| Intent | Load |
-| --- | --- |
-| Universe / index / multi-name | `deep-wide/AGENTS.md` + `shared/*` + role cards |
-| One company | `single-stock/AGENTS.md` + `shared/*` |
-
-## New folder every run
-
-```text
-research/<slug>/<UTC-YYYYMMDDTHHMMSSZ>/
-```
-
-Deep wide: `00_mandate.md` … `10_final_report.md`  
-Single stock: `00_stock_mandate.md` … `03_focused_stock_conclusion.md`

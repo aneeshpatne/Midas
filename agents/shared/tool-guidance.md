@@ -1,9 +1,17 @@
-# MCPs
+# Tools and MCPs
 
-The only allowed external tools are the MCPs from `src/midas/mcp_server.py`
-(`midas-mcp` / server name `midas-market`). Call them by these names only:
+Midas research agents have two complementary surfaces that expose the **same**
+capabilities:
 
-| MCP |
+1. **In-process LangChain tools** on the DeepAgent graph (`MIDAS_TOOLS` in
+   `src/midas/deepagents/tools.py` + `db_tools.py`).
+2. **stdio MCP servers** for external hosts:
+   - `midas-mcp` — market-info scrape tools (`src/midas/mcp_server.py`)
+   - `midas-db-mcp` — paper portfolios + research runs (`src/midas/db_mcp_server.py`)
+
+## Market-info tools (scrape / NSE)
+
+| Tool |
 | --- |
 | `company_fundamentals` |
 | `earnings_transcripts` |
@@ -19,13 +27,31 @@ The only allowed external tools are the MCPs from `src/midas/mcp_server.py`
 | `institutional_activity` |
 | `india_market_context` |
 
-Hosts may add a server prefix (for example `midas__company_fundamentals`); the tool
-name is still one of the rows above.
+Also available on DeepAgents (not on midas-mcp): `web_research`, `twitter_search`,
+chart generators, `send_update`.
 
 Rules:
 
-- Use **only** these MCPs. No other tools.
-- Run them **one at a time**. If a call returns `busy` / `retryable`, wait and retry.
+- Run market scrape tools **one at a time**. If a call returns `busy` / `retryable`, wait and retry.
 - Check `ok` on the JSON payload before trusting data.
-- If an MCP cannot supply a decision-material fact, write `Insufficient Evidence`.
+- If a tool cannot supply a decision-material fact, write `Insufficient Evidence`.
   Never invent numbers, prices, dates, or sources.
+
+## Midas DB tools (durable research + paper portfolio)
+
+| Area | Tools |
+| --- | --- |
+| Research runs | `research_run_create`, `research_run_get`, `research_run_get_bundle`, `research_run_list`, `research_run_set_mandate`, `research_run_set_report`, `research_run_complete`, `research_run_set_status`, `research_run_update` |
+| Run contents | `research_security_add`, `research_security_list`, `research_evidence_append`, `research_evidence_list`, `research_link_portfolio` |
+| Master data | `company_*`, `security_*` |
+| Paper portfolio | `portfolio_*`, `account_*`, `investment_case_*`, `thesis_revision_*`, `transaction_*`, `market_price_*` |
+
+Rules:
+
+- **One research run per request.** Keep the returned `research_run_id` for every write.
+- Persist stage work with `research_evidence_append` (`record_type` values such as
+  `mandate`, `universe`, `primary_screen`, `equal_depth`, `ic_decision`, `source`,
+  `calculation`).
+- Final deliverable is **DB only**: `research_run_set_report` + `research_run_complete`.
+  Do **not** create final PDF/HTML or required intermediate Markdown files.
+- Paper-portfolio tools are for explicit portfolio work; do not invent trades.

@@ -7,22 +7,25 @@
 ## Load
 
 - `agents/shared/long-horizon-policy.md`
+- `agents/shared/tool-guidance.md`
 - `agents/deep-wide/AGENTS.md`
 
 ## Mission
 
-After `00`–`09` exist and are non-empty, synthesize the final report. No new
-unsupported investment judgment. Preserve citations, disagreements, and uncertainty.
+After staged evidence through `ic_decision` exists, synthesize the final decision
+text into **Midas DB**. No new unsupported investment judgment. Preserve citations,
+disagreements, and uncertainty.
 
 ## Result
 
-Write only this Markdown file in the current run folder:
+1. `research_run_set_report` with the A–J decision narrative (Markdown text **stored
+   in DB**, not as a filesystem file).
+2. `research_run_complete`.
 
-- `10_final_report.md`
+Do **not** produce PDF, HTML, or required intermediate Markdown files. Do **not**
+call `generate_report`.
 
-That file is the full result of this role. **No HTML, PDF, or other formats.**
-
-## Structure (exact top-level headings)
+## Structure (exact top-level headings inside report_md)
 
 ```markdown
 # A. Executive Decision Summary
@@ -37,6 +40,6 @@ That file is the full result of this role. **No HTML, PDF, or other formats.**
 # J. Final Conclusion
 ```
 
-Include the 25-item quality-control checklist under J. Preserve the lead’s
-zero-to-three selections. If incomplete, state
-`Incomplete for investment-decision reliance.` and list missing work.
+Include the 25-item quality-control checklist under J. Preserve the lead’s zero to
+three selections. If decision-critical work is missing, state exactly
+`Incomplete for investment-decision reliance.` and list the gaps.

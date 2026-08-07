@@ -13,34 +13,31 @@
 ## Mission
 
 Competing analyst / red team. One mode per invocation. No final selections.
-Do not edit prior artifacts.
+Evidence is append-only — do not mutate prior rows.
 
 ## Result
 
-Write **only one** Markdown file for the active mode in the current run folder.
-That file is the full result of this role. No other formats.
+Append **only one** evidence record type for the active mode on the research run:
 
-| Mode | Write only |
+| Mode | Append only |
 | --- | --- |
-| BLIND INDEPENDENT | `04_adversary_independent.md` |
-| RED-TEAM FALSE-NEGATIVE | `05_adversary_critique.md` |
-| FINALIST BEAR | `08_finalist_bear_cases.md` |
+| BLIND INDEPENDENT | `adversary_independent` |
+| RED-TEAM FALSE-NEGATIVE | `adversary_critique` |
+| FINALIST BEAR | `finalist_bear` |
 
 ### BLIND INDEPENDENT
 
-Read only `00_mandate.md` and `01_universe.md`. Do not open `02_`/`03_`.
-Independent multi-screen funnel + proposed deep-dive set.
+Read only mandate and universe evidence. Do not read primary_screen /
+primary_shortlist. Independent multi-screen funnel + proposed deep-dive set.
 
 ### RED-TEAM FALSE-NEGATIVE
 
-Read primary + independent artifacts. Challenge five strongest excluded (or all
-if fewer). Classify critical / material / minor / unsupported; note re-entries.
+Read primary + independent evidence. Challenge five strongest excluded (or all if
+fewer). Classify critical / material / minor / unsupported; note re-entries.
 
 ### FINALIST BEAR
 
-Read reconciled set + equal-depth research. Bear-case every company past gates
-1–6 (including expensive high quality). Do not soften unresolved objections.
+Read deep_dive_shortlist + equal_depth. Challenge every company that passed gates
+1–6, including expensive high-quality names. Do not soften unresolved objections.
 
-## MCPs
-
-Only the MCPs in `tool-guidance.md`, used sequentially when fresh evidence is needed.
+Use market + Midas DB tools from `tool-guidance.md`.

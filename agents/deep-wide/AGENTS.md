@@ -17,7 +17,7 @@ Every sub-agent **must** use `gpt-5.6-luna` with **high** reasoning.
 ## Load first
 
 1. `agents/shared/long-horizon-policy.md`
-2. `agents/shared/tool-guidance.md` (only allowed MCPs)
+2. `agents/shared/tool-guidance.md` (market tools + Midas DB tools / MCPs)
 3. This file
 4. The role file for the current stage under `agents/deep-wide/`
 
@@ -26,62 +26,51 @@ Every sub-agent **must** use `gpt-5.6-luna` with **high** reasoning.
 | Primary screen | `research-agent.md` |
 | Blind independent + red team + finalist bears | `adversarial-agent.md` |
 | Equal-depth deep dives | `deep-research-agent.md` |
-| Final report | `report-agent.md` |
+| Final report (DB only) | `report-agent.md` |
 
-## Deliverable: Markdown only
+## Deliverable: Midas DB only
 
-**Each stage’s only result is one or more `.md` files** in the current run
-folder. Do not produce HTML, PDF, charts, or other formats. The final user-
-facing artifact is Markdown.
+Durable work lives in **Midas DB** (`research_runs`, `research_evidence`, …).
 
-## New folder every run
+- Create one run with `research_run_create` and keep its `id`.
+- Stage outputs are append-only evidence rows (`research_evidence_append`).
+- Final A–J decision text is stored with `research_run_set_report` and finalized with
+  `research_run_complete`.
+- Do **not** require intermediate Markdown files, PDF, or HTML as deliverables.
+- Optional charts may be generated for the chat, but they are not the record of record.
 
-For every request, create exactly one new directory and write only there:
+## Required evidence record types (in order)
 
-```text
-research/<topic-slug>/<UTC-YYYYMMDDTHHMMSSZ>/
-```
-
-Never reuse or overwrite a prior run folder.
-
-## Required Markdown files (in order)
-
-| File | Owner |
+| record_type | Owner |
 | --- | --- |
-| `00_mandate.md` | Lead |
-| `01_universe.md` | Lead |
-| `02_primary_research.md` | Research |
-| `03_primary_shortlist.md` | Research |
-| `04_adversary_independent.md` | Adversarial (blind) |
-| `05_adversary_critique.md` | Adversarial (red team) |
-| `06_deep_dive_shortlist.md` | Lead |
-| `07_equal_depth_deep_research.md` | Deep-research |
-| `08_finalist_bear_cases.md` | Adversarial (bear) |
-| `09_investment_committee_decision.md` | Lead |
-| `10_final_report.md` | Report |
-
-`00`–`09` must exist and be non-empty before writing `10_final_report.md`.
+| `mandate` | Lead |
+| `universe` | Lead |
+| `primary_screen` | Research |
+| `primary_shortlist` | Research |
+| `adversary_independent` | Adversarial (blind) |
+| `adversary_critique` | Adversarial (red team) |
+| `deep_dive_shortlist` | Lead |
+| `equal_depth` | Deep-research |
+| `finalist_bear` | Adversarial (bear) |
+| `ic_decision` | Lead |
+| `report_md` on research_runs | Report (via set_report + complete) |
 
 ## Workflow
 
-1. Create the run folder. Write `00_mandate.md`.
-2. Write `01_universe.md` (complete universe).
-3. Research role → `02_primary_research.md`, `03_primary_shortlist.md` (no final picks).
-4. Adversarial blind (only `00`+`01`) → `04_adversary_independent.md`.
-5. Adversarial red-team → `05_adversary_critique.md`.
-6. Lead → `06_deep_dive_shortlist.md` (evidence-determined set, no fixed quota).
-7. Deep-research → `07_equal_depth_deep_research.md` (equal depth for every assignee).
-8. Adversarial bear → `08_finalist_bear_cases.md`.
-9. Lead → `09_investment_committee_decision.md` (zero to three selections).
-10. Report → `10_final_report.md` (A–J structure from shared policy).
-11. Return the run-folder path and the `.md` paths. That is the full deliverable.
+1. `research_run_create` → `research_run_set_mandate` → append `mandate`.
+2. Append `universe`; add material securities with `research_security_add`.
+3. Research role → `primary_screen`, `primary_shortlist` (no final picks).
+4. Adversarial blind (only mandate + universe) → `adversary_independent`.
+5. Adversarial red-team → `adversary_critique`.
+6. Lead → `deep_dive_shortlist` (evidence-determined set, no fixed quota).
+7. Deep-research → `equal_depth` (equal depth for every assignee).
+8. Adversarial bear → `finalist_bear`.
+9. Lead → `ic_decision` (zero to three selections).
+10. Report → A–J text into `research_run_set_report` + `research_run_complete`.
+11. Return `research_run_id` and status. That is the full durable deliverable.
 
 ## Execution notes
 
-- Multi-agent: hand each stage its role file + shared policy/MCPs; result is
-  the named `.md` file(s).
-- Single-agent: same stages, same files, same model/reasoning.
-- Blind mode must not read primary shortlist artifacts.
-- Use only the MCPs listed in `tool-guidance.md`. Stages run sequentially.
-- Prefer `Incomplete for investment-decision reliance.` over under-evidenced
-  polish. Never force three picks. Never tell the user to buy or sell.
+- Market scrape tools remain single-flight / sequential.
+- Midas DB tools may be used between market calls.
+- Never invent a second research run for the same request.

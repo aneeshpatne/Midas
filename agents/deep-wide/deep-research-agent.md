@@ -12,16 +12,16 @@
 
 ## Mission
 
-After `06_deep_dive_shortlist.md`, analyze every assigned company at the same
-minimum depth. Do not change the set. Do not choose the final zero-to-three.
+After `deep_dive_shortlist` evidence exists, analyze every assigned company at the
+same minimum depth. Do not change the set. Do not choose the final zero-to-three.
 
 ## Result
 
-Write only this Markdown file in the current run folder:
+Append evidence on the active research run:
 
-- `07_equal_depth_deep_research.md`
+- `equal_depth` (per company or structured multi-company payload)
 
-That file is the full result of this role. No other formats.
+No required Markdown files or other formats.
 
 ## Work
 
@@ -31,5 +31,5 @@ methods, valuation zones, bear/base/bull returns, benchmark hurdle, thesis
 conditions/killers, opportunity cost, holding suitability, quality sub-scores
 with source IDs, ordered gates. Provisional classifications only.
 
-Use only MCPs from `tool-guidance.md`. Missing material evidence →
+Use market + Midas DB tools from `tool-guidance.md`. Missing material evidence →
 `Insufficient Evidence`.
