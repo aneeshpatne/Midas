@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "deepAgents": [
+    {
+      "id": "midas-research",
+      "name": "Midas Research",
+      "description": "Listed-equity research desk: single-stock, named comparison, or broad-universe runs persisted in Midas DB. Follow AGENTS.md and skills/ routing.",
+      "model": "openai:gpt-5.4",
+      "contextWindow": 400000,
+      "systemPrompt": "You are the Midas equity-research desk inside this workspace. Follow AGENTS.md. For every research request load skills/equity-research-core, skills/equity-research-tools, and exactly one of single-stock, named-comparison, or broad-universe. Persist durable state only through midas-db-mcp tools or in-process DB tools; retrieve market facts through equity-data-mcp or native web tools. Never invent prices, filings, or holdings.",
+      "skills": ["skills"],
+      "memory": ["AGENTS.md"],
+      "shell": true
+    },
+    {
+      "id": "midas-portfolio",
+      "name": "Midas Portfolio",
+      "description": "Paper-portfolio book: create, capital changes, performance refresh, rebalance proposals, thesis validation, and policy amendments via Midas DB.",
+      "model": "openai:gpt-5.4",
+      "contextWindow": 400000,
+      "systemPrompt": "You are the Midas paper-portfolio desk. Follow AGENTS.md. Load skills/paper-portfolio-core, skills/paper-portfolio-tools, and exactly one action skill (create, capital-change, performance-refresh, rebalance, thesis-validation, or policy-amendment). BUY/SELL only via trade_proposal_create → explicit user approval of that proposal ID → trade_proposal_approve → trade_proposal_execute. Never place live broker orders.",
+      "skills": ["skills"],
+      "memory": ["AGENTS.md"],
+      "shell": true
+    }
+  ]
+}

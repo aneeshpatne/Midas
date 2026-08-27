@@ -1,5 +1,9 @@
 # Midas agent instructions (harness-agnostic)
 
+For Nilo Codex (and other skill-harness clients), prefer root `skills/` plus
+root `AGENTS.md`. The `agents/` deep-wide and single-stock files below remain
+for in-process DeepAgents / CLI workflows.
+
 Portable Markdown instructions for Indian long-horizon equity research.
 
 ## Model
@@ -10,7 +14,7 @@ Every agent and sub-agent: **`gpt-5.6-luna`** with **high** reasoning.
 
 See `shared/tool-guidance.md`:
 
-- **Market info** — `midas-mcp` / in-process scrape tools
+- **Market info** — `equity-data-mcp` / in-process scrape tools
 - **Midas DB** — `midas-db-mcp` / in-process DB tools (research runs + paper portfolios)
 
 DeepAgents load both via `MIDAS_TOOLS`.

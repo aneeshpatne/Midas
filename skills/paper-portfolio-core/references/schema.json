@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.investigations/portfolio/schema.json",
+  "title": "Persistent paper portfolio contracts",
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "title", "url", "publisher", "data_date", "accessed_at"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^S[0-9]{3,}$"},
+        "title": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "format": "uri"},
+        "publisher": {"type": "string", "minLength": 1},
+        "data_date": {"type": "string", "format": "date-time"},
+        "accessed_at": {"type": "string", "format": "date-time"},
+        "notes": {"type": "string"}
+      }
+    },
+    "allocationTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["large", "mid", "small", "basis"],
+      "properties": {
+        "large": {"type": "number", "minimum": 0, "maximum": 1},
+        "mid": {"type": "number", "minimum": 0, "maximum": 1},
+        "small": {"type": "number", "minimum": 0, "maximum": 1},
+        "basis": {"const": "invested_equity_excluding_cash"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "portfolio_id", "slug", "display_name", "policy_version",
+        "created_at", "currency", "paper_trading", "strategy", "asset_scope",
+        "horizon", "allocation_targets", "cash_policy", "warnings", "constraints",
+        "research_admission", "benchmarks", "cost_policy", "approval_policy", "creation_request"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "portfolio_id": {"type": "string", "pattern": "^PF-[A-Z0-9][A-Z0-9_-]+$"},
+        "slug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "display_name": {"type": "string", "minLength": 1},
+        "policy_version": {"type": "integer", "minimum": 1},
+        "created_at": {"type": "string", "format": "date-time"},
+        "currency": {"const": "INR"},
+        "paper_trading": {"const": true},
+        "strategy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "explanation", "risk_appetite", "user_rules"],
+          "properties": {
+            "label": {"type": "string", "minLength": 1},
+            "explanation": {"type": "string", "minLength": 1},
+            "risk_appetite": {"enum": ["Conservative", "Moderate", "Aggressive", "Custom"]},
+            "user_rules": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "creation_request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["verbatim_prompt", "starting_capital", "market_cap_scope", "research_first", "proposal_first"],
+          "properties": {
+            "verbatim_prompt": {"type": "string", "minLength": 1},
+            "starting_capital": {"type": "number", "exclusiveMinimum": 0},
+            "market_cap_scope": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"enum": ["Large", "Mid", "Small"]}
+            },
+            "sector_scope": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "company_scope": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "research_first": {"const": true},
+            "proposal_first": {"const": true}
+          }
+        },
+        "asset_scope": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"const": "Indian listed equity"}
+        },
+        "horizon": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "years"],
+          "properties": {
+            "kind": {"const": "rolling"},
+            "years": {"type": "integer", "minimum": 1}
+          }
+        },
+        "allocation_targets": {"$ref": "#/$defs/allocationTarget"},
+        "cash_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum", "maximum", "tactical"],
+          "properties": {
+            "minimum": {"type": "number", "minimum": 0, "maximum": 1},
+            "maximum": {"type": "number", "minimum": 0, "maximum": 1},
+            "tactical": {"type": "boolean"}
+          }
+        },
+        "warnings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["single_stock_weight", "sector_weight", "hard_caps"],
+          "properties": {
+            "single_stock_weight": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "sector_weight": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "hard_caps": {"const": false}
+          }
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["long_only", "whole_shares", "leverage", "derivatives", "shorting"],
+          "properties": {
+            "long_only": {"const": true},
+            "whole_shares": {"const": true},
+            "leverage": {"const": false},
+            "derivatives": {"const": false},
+            "shorting": {"const": false}
+          }
+        },
+        "research_admission": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["new_position_stance", "allow_cash_shortfall"],
+          "properties": {
+            "new_position_stance": {"const": "Investable Now"},
+            "allow_cash_shortfall": {"const": true}
+          }
+        },
+        "benchmarks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["primary", "large", "mid", "small", "return_basis"],
+          "properties": {
+            "primary": {"const": "NIFTY 500 TRI"},
+            "large": {"const": "NIFTY 100 TRI"},
+            "mid": {"const": "NIFTY Midcap 150 TRI"},
+            "small": {"const": "NIFTY Smallcap 250 TRI"},
+            "return_basis": {"const": "total_return_index"}
+          }
+        },
+        "cost_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["statutory_costs", "slippage_bps_per_side", "personal_tax"],
+          "properties": {
+            "statutory_costs": {"const": "dated_source_backed"},
+            "slippage_bps_per_side": {"type": "number", "minimum": 0},
+            "personal_tax": {"const": false}
+          }
+        },
+        "approval_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["initial_trades", "capital_deployment", "rebalance", "automatic_actions"],
+          "properties": {
+            "initial_trades": {"const": "explicit_proposal_approval"},
+            "capital_deployment": {"const": "explicit_proposal_approval"},
+            "rebalance": {"const": "explicit_proposal_approval"},
+            "automatic_actions": {"const": false}
+          }
+        },
+        "user_exclusions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "eventBase": {
+      "type": "object",
+      "required": ["schema_version", "event_id", "portfolio_id", "event_type", "recorded_at", "effective_at", "policy_version"],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "event_id": {"type": "string", "pattern": "^EV-[A-Z0-9][A-Z0-9_-]+$"},
+        "portfolio_id": {"type": "string", "pattern": "^PF-[A-Z0-9][A-Z0-9_-]+$"},
+        "event_type": {"type": "string"},
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "effective_at": {"type": "string", "format": "date-time"},
+        "policy_version": {"type": "integer", "minimum": 1},
+        "source_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+        "notes": {"type": "string"}
+      }
+    },
+    "event": {
+      "allOf": [
+        {"$ref": "#/$defs/eventBase"},
+        {
+          "oneOf": [
+            {
+              "properties": {"event_type": {"const": "portfolio_created"}, "display_name": {"type": "string"}},
+              "required": ["display_name"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "cash_flow"},
+                "flow_type": {"enum": ["Contribution", "Withdrawal"]},
+                "amount": {"type": "number", "exclusiveMinimum": 0}
+              },
+              "required": ["flow_type", "amount"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "trade_proposal"},
+                "proposal_id": {"type": "string"},
+                "status": {"enum": ["Draft", "Approved", "Rejected", "Superseded", "Executed"]},
+                "trades": {"type": "array", "items": {"$ref": "#/$defs/trade"}},
+                "warnings": {"type": "array", "items": {"type": "string"}}
+              },
+              "required": ["proposal_id", "status", "trades", "warnings"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "proposal_status"},
+                "proposal_id": {"type": "string"},
+                "status": {"enum": ["Approved", "Rejected", "Superseded", "Executed"]}
+              },
+              "required": ["proposal_id", "status"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "trade_execution"},
+                "proposal_id": {"type": "string"},
+                "trade": {"$ref": "#/$defs/trade"}
+              },
+              "required": ["proposal_id", "trade"]
+            },
+            {
+              "properties": {
+                "event_type": {"enum": ["price_snapshot", "benchmark_snapshot"]},
+                "observations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/observation"}}
+              },
+              "required": ["observations"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "dividend"},
+                "symbol": {"type": "string"},
+                "amount": {"type": "number", "minimum": 0},
+                "payment_date": {"type": "string", "format": "date"}
+              },
+              "required": ["symbol", "amount", "payment_date"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "corporate_action"},
+                "symbol": {"type": "string"},
+                "action_type": {"type": "string"},
+                "shares_before": {"type": "number", "minimum": 0},
+                "shares_after": {"type": "number", "minimum": 0},
+                "cost_before": {"type": "number", "minimum": 0},
+                "cost_after": {"type": "number", "minimum": 0}
+              },
+              "required": ["symbol", "action_type", "shares_before", "shares_after", "cost_before", "cost_after"]
+            },
+            {
+              "properties": {
+                "event_type": {"enum": ["thesis_snapshot", "thesis_validation"]},
+                "symbol": {"type": "string"},
+                "research_run_path": {"type": "string", "pattern": "^research/"},
+                "thesis_status": {"enum": ["Intact", "Weakened", "Broken", "Needs Evidence"]},
+                "thesis": {"type": "string"},
+                "invalidation_triggers": {"type": "array", "items": {"type": "string"}},
+                "controlling_change": {"type": "string"},
+                "next_review_condition": {"type": "string"}
+              },
+              "required": ["symbol", "research_run_path", "thesis_status", "thesis", "invalidation_triggers"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "policy_amendment"},
+                "old_policy_version": {"type": "integer", "minimum": 1},
+                "new_policy_version": {"type": "integer", "minimum": 2},
+                "changes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/policyChange"}},
+                "reason": {"type": "string", "minLength": 1}
+              },
+              "required": ["old_policy_version", "new_policy_version", "changes", "reason"]
+            },
+            {
+              "properties": {
+                "event_type": {"const": "correction"},
+                "supersedes_event_id": {"type": "string"},
+                "reason": {"type": "string", "minLength": 1},
+                "replacement": {"type": "object"}
+              },
+              "required": ["supersedes_event_id", "reason", "replacement"]
+            }
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "trade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "legal_name", "side", "quantity", "price", "price_as_of", "price_source_id", "fees", "slippage", "research_run_path", "research_stance"],
+      "properties": {
+        "symbol": {"type": "string", "minLength": 1},
+        "legal_name": {"type": "string", "minLength": 1},
+        "side": {"enum": ["Buy", "Sell"]},
+        "quantity": {"type": "integer", "minimum": 1},
+        "price": {"type": "number", "exclusiveMinimum": 0},
+        "price_as_of": {"type": "string", "format": "date-time"},
+        "price_source_id": {"type": "string"},
+        "fees": {"type": "number", "minimum": 0},
+        "slippage": {"type": "number", "minimum": 0},
+        "sector": {"type": "string"},
+        "market_cap_bucket": {"enum": ["Large", "Mid", "Small", "Unknown"]},
+        "classification_vintage": {"type": ["string", "null"]},
+        "research_run_path": {"type": "string", "pattern": "^research/"},
+        "research_stance": {"const": "Investable Now"}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument", "value", "as_of", "source_id"],
+      "properties": {
+        "instrument": {"type": "string", "minLength": 1},
+        "value": {"type": "number", "exclusiveMinimum": 0},
+        "as_of": {"type": "string", "format": "date-time"},
+        "source_id": {"type": "string"}
+      }
+    },
+    "policyChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "old_value", "new_value"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "old_value": {},
+        "new_value": {}
+      }
+    },
+    "holding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "legal_name", "shares", "open_cost", "invested_price", "realized_pnl", "thesis_status"],
+      "properties": {
+        "symbol": {"type": "string"},
+        "legal_name": {"type": "string"},
+        "sector": {"type": ["string", "null"]},
+        "market_cap_bucket": {"enum": ["Large", "Mid", "Small", "Unknown"]},
+        "classification_vintage": {"type": ["string", "null"]},
+        "shares": {"type": "integer", "minimum": 0},
+        "open_cost": {"type": "number", "minimum": 0},
+        "invested_price": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "current_price": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "price_as_of": {"type": ["string", "null"], "format": "date-time"},
+        "price_source_id": {"type": ["string", "null"]},
+        "market_value": {"type": ["number", "null"], "minimum": 0},
+        "absolute_change": {"type": ["number", "null"]},
+        "percentage_change": {"type": ["number", "null"]},
+        "realized_pnl": {"type": "number"},
+        "unrealized_pnl": {"type": ["number", "null"]},
+        "portfolio_weight": {"type": ["number", "null"], "minimum": 0},
+        "thesis_status": {"enum": ["Intact", "Weakened", "Broken", "Needs Evidence"]},
+        "thesis_date": {"type": ["string", "null"], "format": "date-time"},
+        "research_run_path": {"type": ["string", "null"]}
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "portfolio_id", "display_name", "policy_version", "as_of", "currency", "summary", "holdings", "transactions", "performance", "market_cap_summary", "sector_summary", "theses", "warnings", "sources", "checks"],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "portfolio_id": {"type": "string"},
+        "display_name": {"type": "string"},
+        "policy_version": {"type": "integer", "minimum": 1},
+        "as_of": {"type": "string", "format": "date-time"},
+        "currency": {"const": "INR"},
+        "summary": {
+          "type": "object",
+          "required": ["contributions", "withdrawals", "cash", "invested_cost", "market_value", "portfolio_value", "realized_pnl", "unrealized_pnl"],
+          "additionalProperties": {"type": ["number", "string", "null"]}
+        },
+        "holdings": {"type": "array", "items": {"$ref": "#/$defs/holding"}},
+        "transactions": {"type": "array", "items": {"type": "object"}},
+        "performance": {"type": "array", "items": {"type": "object"}},
+        "market_cap_summary": {"type": "array", "items": {"type": "object"}},
+        "sector_summary": {"type": "array", "items": {"type": "object"}},
+        "theses": {"type": "array", "items": {"type": "object"}},
+        "warnings": {"type": "array", "items": {"type": "object"}},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+        "checks": {"type": "array", "items": {"type": "object"}}
+      }
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/policy"},
+    {"$ref": "#/$defs/event"},
+    {"$ref": "#/$defs/state"}
+  ]
+}

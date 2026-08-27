@@ -4,11 +4,13 @@
 
 **Long-horizon Indian equity research with a durable, auditable paper trail**
 
-Midas turns a sector, NSE index, company, or research question into staged multi-agent diligence—primary screening, adversarial challenge, equal-depth deep research, and an investment-committee decision—persisted in **Midas DB**, not a stack of Markdown/PDF files. The runtime combines two research modes, four specialized DeepAgents subagent roles, 64 in-process tools, two stdio MCP servers, and a 12-table SQLite domain model. Its grounded web path is bounded to three concurrent page fetches per call, so the repository exposes concrete resource limits even though it does not contain production latency or throughput benchmarks.
+Midas is a Python 3.12 research runtime for **one-to-two-year, owner-style** Indian public-equity analysis. It turns a sector, NSE index, company, or research question into staged multi-agent diligence—primary screening, adversarial challenge, equal-depth deep research, and an investment-committee decision—persisted in **Midas DB** (SQLite), not a stack of Markdown/PDF files.
+
+The primary client is **Nilo** (Codex / Grok / OpenCode / Deep Agents) via `.nilo/` branding, a **16-skill** routing pack, and **two** stdio MCP servers. The in-process path keeps **two** research modes, **four** DeepAgents subagent roles, **73** LangChain tools, **13** domain tables with **29** indexes across **4** migrations, and a grounded web pipeline capped at **3** concurrent page fetches per call. Market MCP responses are scrubbed of external URLs on the wire. The repository documents those resource bounds explicitly; it does **not** include production latency, throughput, or uptime telemetry.
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-0.1.0-informational)](./pyproject.toml)
-[![UI](https://img.shields.io/badge/UI-Textual-purple)](https://textual.textualize.io/)
+[![UI](https://img.shields.io/badge/UI-Nilo%20(TUI%20deprecated)-purple)](https://github.com/aneeshpatne/Midas)
 [![Agents](https://img.shields.io/badge/agents-DeepAgents-0A66C2)](https://github.com/langchain-ai/deepagents)
 [![MCP](https://img.shields.io/badge/MCP-market%20%2B%20DB-black)](https://modelcontextprotocol.io/)
 [![Package manager](https://img.shields.io/badge/uv-ready-de5fe9?logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
@@ -24,12 +26,13 @@ Midas is research software for **one-to-two-year, owner-style** Indian public-eq
 
 | Surface | Role |
 | --- | --- |
-| **Deep Wide Research Agent** | Screen a sector, index, or multi-name universe through independent screens, red-team challenge, equal-depth diligence, and IC decision. |
-| **Single Stock Research Agent** | Investment-grade dossier on exactly one listed company. |
-| **Textual TUI** (`midas-tui`) | Interactive sessions with Shift+Tab mode switching, streaming tool activity, and resume. |
+| **Nilo workspace** | Primary client: open this repo in the Nilo Electron app (Codex / Grok / OpenCode / Deep Agents). Branding and starter prompts live in `.nilo/`; skills + `AGENTS.md` route equity research and paper-portfolio work. |
+| **Deep Wide / Single Stock** | In-process DeepAgents graphs for universe screening and one-name dossiers (also used by CLI). |
+| **Skills pack** | Mercury-style Codex skills under `skills/` (single-stock, named-comparison, broad-universe, auditors, paper portfolio). |
 | **CLI** (`midas`) | One-shot research from the terminal. |
 | **Library** | Web research, fundamentals, and market-signal helpers as Pydantic models. |
-| **MCP** | Two stdio servers for external hosts (Codex, Cursor, Claude Desktop): market info and Midas DB. |
+| **MCP** | Two stdio servers (`equity-data-mcp`, `midas-db-mcp`) for Nilo providers and other hosts: market info and Midas DB (including approval-gated trade proposals). |
+| **Textual TUI** (`midas-tui`) | Legacy interactive sessions — being sunset; prefer Nilo. |
 
 **Durable output lives in Midas DB** (SQLite): research runs, append-only evidence, securities master, and optional paper portfolios. Agents write stage results as evidence rows and store the final A–J decision text on the run (`report_md`). Intermediate Markdown files and PDF/HTML final reports are **not** required deliverables. Each evidence row receives a monotonically increasing sequence number within its research run, making stage history queryable without relying on filesystem ordering.
 
@@ -38,16 +41,20 @@ Midas is research software for **one-to-two-year, owner-style** Indian public-eq
 
 ## Engineering highlights
 
-The metrics below are verified from the implementation and local validation run. They describe supported surface area and safety/resource bounds—not production throughput, uptime, or latency claims.
+The metrics below are verified from the implementation and a local validation run on **2026-08-27**. They describe supported surface area, safety bounds, and test outcomes—not production throughput, uptime, or p95 latency.
 
 | Area | Verified engineering fact |
 | --- | --- |
-| **Agent workflow** | Deep Wide research has **10 ordered evidence record types** from mandate through IC decision; Single Stock has a focused **4-record** workflow. Four specialized subagent roles handle primary screening, adversarial review, equal-depth research, and report editing. |
-| **Tool surface** | `MIDAS_TOOLS` registers **64 in-process tools**: 13 market-information, 40 Midas DB, 8 charting, plus web research, X search, and progress updates. |
-| **Data model** | The bootstrap schema defines **12 domain tables**, **26 indexes**, and **3 versioned migrations**. SQLite `STRICT` tables, foreign keys, WAL journaling, and a **5,000 ms** busy timeout are enabled by the schema/connection layer. |
-| **Grounded web pipeline** | Each request accepts **1–10** result targets and fetches at most **3 pages concurrently**; source text is capped at **12,000 characters** and compressed output at **4,800 characters**. Browser startup gets **2 attempts**, followed by an HTTP fallback with a **20 s** timeout, **5** checked redirects, and a **4 MiB** response limit. |
-| **Caching and contention control** | Successful JSON responses only are cached with freshness windows from **5 minutes to 7 days**. Redis failure is fail-open, with a process-local **256-entry** LRU fallback; upstream sources use non-blocking single-flight gates, the market MCP adapter adds a process-wide sequential gate, and X search is capped at **2 calls per agent**. |
-| **Validation snapshot** | On **2026-08-27**, the default pytest run collected **180 tests**: **166 passed**, **12 skipped** (opt-in integration coverage), and **2 failed** in [`tests/test_reporting.py`](./tests/test_reporting.py). `ruff check .` reported **6 lint errors**. No load-test or production telemetry is checked into the repository. |
+| **Agent workflow** | Deep Wide uses **10** ordered evidence `record_type`s from mandate through IC decision; Single Stock uses a focused **4-record** path (`mandate`, `company_dossier`, `valuation_and_risk`, `focused_conclusion`). **Four** named subagents (`research-agent`, `adversarial-agent`, `deep-research-agent`, `report-agent`) sit under the Deep Wide lead. Final `report_md` follows a fixed **A–J** (10-section) decision structure. |
+| **Tool surface** | `MIDAS_TOOLS` registers **73** in-process tools: **13** market-information, **49** Midas DB (including **7** `trade_proposal_*` tools), **8** chart generators, plus `web_research`, `twitter_search`, and `send_update`. |
+| **MCP surface** | Two stdio servers: `equity-data` exposes **13** market tools (URLs scrubbed on the wire; host timeout guidance **180 s**); `midas-db` exposes **71** DB operations (host timeout guidance **60 s**). |
+| **Data model** | Bootstrap schema: **13** domain tables (+ `schema_migrations`), **29** indexes, **4** versioned migrations. SQLite `STRICT` tables, foreign keys, WAL journaling, and a **5,000 ms** busy timeout. Paper ledger supports **12** transaction types and **5** trade-proposal statuses (`DRAFT` → `EXECUTED`). Research runs use **3** workflows and **5** run statuses. |
+| **Index coverage** | `nse_list_index` / market-scan tools accept **122** named NSE index / special-list values from the `NseIndex` enum (broad market, sectoral, and F&O universes). |
+| **Grounded web pipeline** | Each `web_research` call accepts **1–10** result targets and fetches at most **3** pages concurrently; cleaned source text is capped at **12,000** characters and compressed output at **4,800**. Browser startup gets **2** attempts, then HTTP fallback with a **20 s** timeout, **5** redirects, and a **4 MiB** body limit. Search itself uses a **15 s** timeout. |
+| **Caching and contention** | Success-only JSON tool responses are cached with TTLs of **5 min** (live), **1 h** (market), **6 h** (web), **24 h** (company/signals), or **7 d** (transcripts). Redis connect/read timeouts are **0.25 s / 0.5 s**; failure is fail-open to a process-local **256-entry** LRU. Per-source single-flight gates plus a market-MCP sequential gate return non-blocking `busy` / `retryable` JSON. X search is capped at **2** calls per agent (**60 s** CLI timeout). |
+| **Nilo / skills pack** | **16** skill directories under `skills/`, root `AGENTS.md` router, **8** Nilo starter prompts, and **2** declared Deep Agents in `.nilo/agents.json`. Console scripts: **6** entry points (including deprecated `midas-tui` / `midas-mcp` aliases). |
+| **Codebase shape** | **60** Python modules under `src/midas/`, **25** `tests/test_*.py` modules, **9** agent Markdown instruction files under `agents/`. |
+| **Validation snapshot** | Default `pytest` collected **183** tests: **169 passed**, **12 skipped** (opt-in `MIDAS_RUN_INTEGRATION=1` network/browser/PDF checks), **2 failed** in [`tests/test_reporting.py`](./tests/test_reporting.py). `ruff check .` reported **7** lint errors (**6** auto-fixable). No load-test suite or production telemetry is checked into the repository. |
 
 ---
 
@@ -55,16 +62,16 @@ The metrics below are verified from the implementation and local validation run.
 
 | Area | What you get |
 | --- | --- |
-| **Two research modes** | Deep Wide (universe funnel) and Single Stock (one name, full depth). |
-| **Decision standard** | Reproducible quality scoring, ordered gates, valuation zones, scenario returns, zero-to-three selections. |
-| **Midas DB** | SQLite store for research runs, evidence ledger, companies/securities, paper portfolios, cash/trade ledger, thesis revisions. |
-| **Indian market tools** | Fundamentals, filings, quotes, trading history, index constituents, scans, calendars, deals, derivatives, institutional flows, market context. |
-| **Grounded web research** | Search → Camoufox/HTTP fetch → main-text extract → Ollama compression (full cleaned text retained on success). |
-| **Dual MCP servers** | `midas-mcp` (market info) and `midas-db-mcp` (DB / portfolio / research runs). |
-| **DeepAgents integration** | Same market + DB tools registered on LangChain agents (`MIDAS_TOOLS`). |
-| **Interactive TUI** | Mode switch, live agents/tools/todos, session list/resume, isolated session workspaces. |
-| **Resilience** | Per-source single-flight gates, sequential market-tool policy, optional fail-open Redis cache. |
-| **Optional charts** | Bar, line, area, pie, stacked-bar, scatter, heatmap PNGs for the chat—not the system of record. |
+| **Two research modes** | Deep Wide (universe funnel, 10 evidence stages) and Single Stock (one name, 4 evidence stages). |
+| **Decision standard** | Reproducible quality scoring, ordered gates, valuation zones, scenario returns, **zero-to-three** final selections; incomplete work labeled *Insufficient Evidence*. |
+| **Midas DB** | **13** domain tables for research runs, evidence ledger, companies/securities, paper portfolios, **approval-gated** trade proposals, cash/trade ledger (**12** tx types), thesis revisions. |
+| **Indian market tools** | **13** market-info tools: fundamentals, signals, filings, quotes, trading history, **122** index lists, scans, calendars, deals, derivatives, institutional flows, market context. |
+| **Grounded web research** | Search → Camoufox/HTTP fetch → main-text extract → Ollama compression; **≤3** concurrent fetches; **12k / 4.8k** char caps. |
+| **Dual MCP servers** | `equity-data-mcp` (**13** tools, URL-scrubbed) and `midas-db-mcp` (**71** operations). |
+| **DeepAgents integration** | Same market + DB + chart tools on LangChain agents (`MIDAS_TOOLS` = **73**). |
+| **Skills / Nilo** | **16** Codex-oriented skills + **8** Nilo starter prompts; TUI is deprecated. |
+| **Resilience** | Per-source single-flight gates, sequential market-tool policy, optional fail-open Redis cache (TTL **5 min–7 d**), X search budget **2**/agent. |
+| **Optional charts** | **8** PNG chart tools (bar, horizontal-bar, line, area, pie, stacked-bar, scatter, heatmap)—chat aids, not the system of record. |
 
 ---
 
@@ -117,11 +124,12 @@ Final A–J decision text is stored via `research_run_set_report` and finalized 
 ```mermaid
 flowchart TB
   subgraph apps [Application]
+    NILO[Nilo workspace]
     CLI[midas CLI]
-    TUI[midas-tui]
+    TUI[midas-tui deprecated]
     LIB[Python API]
-    MCPM[midas-mcp]
-    MCPD[midas-db-mcp]
+    MCPM[equity-data-mcp 13]
+    MCPD[midas-db-mcp 71]
   end
 
   subgraph agents [Agent layer]
@@ -145,6 +153,8 @@ flowchart TB
     REDIS[(Optional Redis)]
   end
 
+  NILO --> MCPM
+  NILO --> MCPD
   CLI --> LEAD
   TUI --> LEAD
   TUI --> STOCK
@@ -167,26 +177,26 @@ flowchart TB
 
 **Design notes:**
 
-- **Agent construction** — `create_research_agent(mode)` for TUI dispatch; `create_midas_agent()` / `create_single_stock_agent()` for explicit graphs. Both share `MIDAS_TOOLS` (market + DB + charts + web).
-- **Models** — lead/research/adversarial: OpenRouter `openai/gpt-5.6-luna` (medium reasoning); deep-research and report synthesis: same model, high reasoning. Compression uses a local Ollama OpenAI-compatible endpoint.
-- **Tool contracts** — compact JSON with `ok`; market tools may return `status: "busy"` / `retryable: true`. DB tools share the same response shape.
-- **Web-pipeline bounds** — each `web_research` call targets 1–10 results and scrapes up to 3 pages concurrently. Browser startup is retried twice; if it still fails, the HTTP path enforces a 20-second timeout, 5 redirects, and a 4 MiB response cap.
-- **Cache policy** — success-only tool responses use TTLs of 5 minutes (live data), 1 hour (market data), 6 hours (web), 24 hours (company data), or 7 days (transcripts). A failed Redis connection degrades to the bounded 256-entry in-process cache.
-- **Persistence** — research and paper portfolios in `midas.db` (override with `MIDAS_DB_PATH`); TUI chat sessions in `output/.midas-sessions.sqlite3`; optional session workspaces under `output/<session-id>/` for charts/scratch only.
+- **Agent construction** — `create_research_agent(mode)` for mode-aware dispatch; `create_midas_agent()` / `create_single_stock_agent()` for explicit graphs. Both share `MIDAS_TOOLS` (**73** tools: market + DB + charts + web + X + progress).
+- **Models** — lead/research/adversarial: OpenRouter `openai/gpt-5.6-luna` (medium reasoning); deep-research and report synthesis: same model, high reasoning. Compression uses a local Ollama OpenAI-compatible endpoint (`gpt-oss:120b-cloud` default in `pipeline.py`).
+- **Tool contracts** — compact JSON with `ok`; market tools may return `status: "busy"` / `retryable: true` under single-flight or sequential gates. DB tools share the same response shape. Market MCP additionally drops URL-bearing fields before they leave the process.
+- **Web-pipeline bounds** — each `web_research` call targets **1–10** results and scrapes up to **3** pages concurrently (**15 s** search timeout). Browser startup is retried **twice**; if it still fails, the HTTP path enforces a **20 s** timeout, **5** redirects, and a **4 MiB** response cap.
+- **Cache policy** — success-only tool responses use TTLs of **5 minutes** (live), **1 hour** (market), **6 hours** (web), **24 hours** (company/signals), or **7 days** (transcripts). Redis connect/read timeouts are **0.25 s / 0.5 s**; failure degrades to a **256-entry** in-process LRU. X search is limited to **2** calls per agent.
+- **Persistence** — research and paper portfolios in `midas.db` (override with `MIDAS_DB_PATH`); deprecated TUI sessions in `output/.midas-sessions.sqlite3`; optional session workspaces under `output/<session-id>/` for charts/scratch only (gitignored).
 
 ---
 
 ## Midas DB
 
-SQLite **STRICT** tables, WAL mode, foreign keys, and a 5,000 ms busy timeout. The bootstrap schema contains 12 domain tables and 26 indexes; schema evolution is represented by 3 migrations (versions 1–3). Schema source of truth: `src/midas/db/migrate.py` and `src/midas/db/schema.bootstrap.sql`.
+SQLite **STRICT** tables, WAL mode, foreign keys, and a **5,000 ms** busy timeout. The bootstrap schema contains **13** domain tables and **29** indexes; schema evolution is represented by **4** migrations (versions 1–4), including approval-gated `trade_proposals`. Schema source of truth: `src/midas/db/migrate.py` and `src/midas/db/schema.bootstrap.sql`.
 
 | Domain | Tables (high level) |
 | --- | --- |
 | Master data | `companies`, `securities`, `market_prices` |
-| Paper portfolio | `portfolios`, `portfolio_accounts`, `investment_cases`, `thesis_revisions`, `transactions` |
+| Paper portfolio | `portfolios`, `portfolio_accounts`, `investment_cases`, `thesis_revisions`, `trade_proposals`, `transactions` |
 | Research | `research_runs`, `research_run_securities`, `research_evidence`, `research_portfolio_links` |
 
-The research ledger is append-oriented: `research_evidence` stores stage, source, and calculation payloads with per-run sequence numbers and indexes for run order, record type, and symbol. Portfolio amounts use integer paise and quantities use integer micros to avoid floating-point ledger arithmetic.
+The research ledger is append-oriented: `research_evidence` stores stage, source, and calculation payloads with per-run sequence numbers and indexes for run order, record type, and symbol. Portfolio amounts use integer **paise** (₹1 = 100 paise) and quantities use integer **micros** (1 share = 1_000_000 micros) to avoid floating-point ledger arithmetic. BUY/SELL must go through `trade_proposal_create` → explicit user approval of that proposal ID → `trade_proposal_approve` → `trade_proposal_execute` (**5** proposal statuses).
 
 ```bash
 # Apply migrations (creates midas.db in the project root by default)
@@ -212,9 +222,9 @@ run_migrations()
 pf = portfolios_service.create(CreatePortfolioInput(name="Demo book"))
 run = research_runs_service.create(
     CreateResearchRunInput(
-        slug="reliance-7y",
+        slug="demo-co-7y",
         workflow="single_stock",
-        universe_or_company="Reliance Industries",
+        universe_or_company="Demo Company",
         horizon_text="7 years",
     )
 )
@@ -226,17 +236,17 @@ run = research_runs_service.create(
 
 | Layer | Technology |
 | --- | --- |
-| Language | Python 3.12+ |
-| Packaging | [uv](https://docs.astral.sh/uv/), project `midas` 0.1.0 |
-| UI | [Textual](https://textual.textualize.io/) |
-| Agents | [DeepAgents](https://github.com/langchain-ai/deepagents), LangGraph, LangChain tools |
-| MCP | [MCP](https://modelcontextprotocol.io/) Python SDK (FastMCP) |
+| Language | Python **3.12+** (`requires-python >=3.12`) |
+| Packaging | [uv](https://docs.astral.sh/uv/), project `midas` **0.1.0**, **6** console scripts |
+| Primary UI | Nilo Electron workspace (`.nilo/` branding + skills); Textual TUI **deprecated** |
+| Agents | [DeepAgents](https://github.com/langchain-ai/deepagents) / LangGraph / LangChain tools (**73** `MIDAS_TOOLS`) |
+| MCP | [MCP](https://modelcontextprotocol.io/) Python SDK (FastMCP): **13** + **71** tools |
 | Models | [OpenRouter](https://openrouter.ai/) (`openai/gpt-5.6-luna`); Ollama for compression |
-| Search / fetch | ddgs, Camoufox, httpx, BeautifulSoup/lxml, trafilatura |
-| Market data | `nse`, `nselib`, `indian-market-data`, HTTP helpers |
-| Persistence | SQLite (Midas DB + TUI sessions); optional Redis tool cache |
-| Charts | Pillow PNG tools |
-| Quality | pytest, pytest-asyncio, ruff |
+| Search / fetch | ddgs, Camoufox, httpx, BeautifulSoup/lxml, trafilatura (**≤3** concurrent pages) |
+| Market data | `nse`, `nselib`, `indian-market-data`, HTTP helpers (**122** `NseIndex` values) |
+| Persistence | SQLite Midas DB (**13** domain tables, WAL, FK, **5 s** busy timeout); optional Redis tool cache |
+| Charts | Pillow — **8** PNG chart tools |
+| Quality | pytest, pytest-asyncio, ruff (**183** collected tests in the latest local run) |
 
 ---
 
@@ -244,20 +254,24 @@ run = research_runs_service.create(
 
 ```text
 midas/
-├── pyproject.toml
-├── agents/                          # Harness-agnostic role instructions
+├── pyproject.toml                   # midas 0.1.0; 6 console scripts
+├── AGENTS.md                        # Nilo/Codex skill router
+├── skills/                          # 16 equity-research + paper-portfolio skills
+├── .nilo/                           # branding.json, agents.json, logo
+├── agents/                          # 9 Markdown role files (DeepAgents / CLI)
 │   ├── shared/                      # Policy + tool/MCP guidance
-│   ├── deep-wide/                   # Lead + stage roles
+│   ├── deep-wide/                   # Lead + 4 stage roles
 │   └── single-stock/
 ├── examples/
-├── src/midas/
+├── src/midas/                       # 60 Python modules
 │   ├── cli.py                       # midas
-│   ├── mcp_server.py                # midas-mcp (market)
-│   ├── db_mcp_server.py             # midas-db-mcp (DB)
+│   ├── mcp_server.py                # equity-data-mcp (13 tools; URL scrub)
+│   ├── db_mcp_server.py             # midas-db-mcp (71 ops)
+│   ├── mcp_sanitize.py              # MCP wire URL/vendor scrubber
 │   ├── pipeline.py                  # Web search → scrape → compress
 │   ├── market_data.py
-│   ├── sessions.py                  # TUI SQLite sessions
-│   ├── db/                          # Midas DB
+│   ├── sessions.py                  # Deprecated TUI SQLite sessions
+│   ├── db/                          # Midas DB (13 domain tables, 4 migrations)
 │   │   ├── schema.bootstrap.sql
 │   │   ├── migrate.py               # midas-db-migrate
 │   │   ├── connection.py
@@ -329,7 +343,7 @@ uv run midas-db-migrate
 uv run midas "Summarize TCS's latest results and concall guidance"
 uv run midas "NIFTY IT quality screen, 2-year horizon"
 
-# Interactive TUI
+# Interactive TUI (deprecated — prefer Nilo)
 uv run midas-tui
 ```
 
@@ -357,23 +371,27 @@ agent = create_research_agent(ResearchMode.SINGLE_STOCK)
 
 ## MCP servers
 
-### Market info — `midas-mcp`
+### Market info — `equity-data-mcp`
 
-Exposes **13 market-information tools** covering fundamentals, signals, and NSE/market structure. **Not** included: web search, X/Twitter, charts, or agent UI helpers.
+Exposes **13** market-information tools covering fundamentals, signals, and exchange market structure (including **122** named index/list values for constituent listing). **Not** included: web search, X/Twitter, charts, or agent UI helpers. The MCP server id is generic (`equity-data`); the deprecated CLI alias `midas-mcp` still points here.
+
+**MCP wire policy:** tool descriptions and JSON responses are scrubbed of external URLs, vendor hostnames, and example company tickers before they leave the process.
 
 ```bash
-uv run midas-mcp
+uv run equity-data-mcp
 ```
 
 | Behavior | Detail |
 | --- | --- |
+| Tool count | **13** market tools |
 | Concurrency | One active call per source; process-wide sequential gate across market tools |
 | Busy response | JSON `ok: false`, `status: "busy"`, `retryable: true` |
-| Timeout | Hosts should allow ~180s for slow scrapes |
+| Host timeout guidance | **180 s** (Codex / OpenCode project configs) |
+| URLs on wire | Never — `source_url` / `https://…` fields are dropped or redacted |
 
 ### Midas DB — `midas-db-mcp`
 
-Paper portfolios, securities master, investment cases, thesis revisions, transactions, research runs, and evidence ledger. The server registers **53 DB operations**; DeepAgents use the corresponding 40-tool in-process DB surface. Same persistence and validation rules apply to both paths.
+Paper portfolios, securities master, investment cases, thesis revisions, approval-gated trade proposals, transactions, research runs, and evidence ledger. The server registers **71** DB operations; DeepAgents expose a **49**-tool in-process DB surface (`MIDAS_DB_TOOLS`). BUY/SELL must go through `trade_proposal_*` after explicit user approval of a proposal ID. Same persistence and validation rules apply to both paths.
 
 ```bash
 uv run midas-db-mcp
@@ -381,22 +399,26 @@ uv run midas-db-mcp
 
 | Behavior | Detail |
 | --- | --- |
-| Schema | Migrations run on server start |
+| Tool count | **71** MCP operations / **49** in-process DB tools |
+| Schema | Migrations **1–4** applied on server start |
 | Money | Integer **paise** (₹1 = 100 paise) |
 | Quantity | Integer **micros** (1 share = 1_000_000 micros) |
 | Time | Epoch milliseconds |
+| Host timeout guidance | **60 s** (Codex / OpenCode project configs) |
 
 ### Codex config example
 
+Run Codex with this repository as the working directory (no machine-specific absolute paths):
+
 ```toml
-[mcp_servers.midas]
+[mcp_servers.equity-data]
 command = "uv"
-args = ["run", "--directory", "/absolute/path/to/Midas", "midas-mcp"]
+args = ["run", "equity-data-mcp"]
 tool_timeout_sec = 180
 
 [mcp_servers.midas-db]
 command = "uv"
-args = ["run", "--directory", "/absolute/path/to/Midas", "midas-db-mcp"]
+args = ["run", "midas-db-mcp"]
 tool_timeout_sec = 60
 ```
 
@@ -405,23 +427,26 @@ tool_timeout_sec = 60
 ```json
 {
   "mcpServers": {
-    "midas": {
+    "equity-data": {
       "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/Midas", "midas-mcp"]
+      "args": ["run", "equity-data-mcp"]
     },
     "midas-db": {
       "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/Midas", "midas-db-mcp"]
+      "args": ["run", "midas-db-mcp"]
     }
   }
 }
 ```
 
-Harness-agnostic agent instructions (roles, evidence types, tool names) live under [`agents/`](./agents/).
+Harness-agnostic agent instructions (roles, evidence types, tool names) live under [`agents/`](./agents/) and `skills/`. Do not commit research run output, `midas.db`, or machine-local MCP path overrides.
 
 ---
 
-## TUI controls
+## TUI controls (deprecated)
+
+> [!WARNING]
+> `midas-tui` is **deprecated** and will be removed. Use the Nilo Electron client with this repo as the workspace instead.
 
 | Input | Action |
 | --- | --- |
@@ -449,7 +474,7 @@ uv run pytest
 MIDAS_RUN_INTEGRATION=1 uv run pytest -m integration
 ```
 
-The suite contains **24 test modules** and collected **180 test cases** in the current environment. The 2026-08-27 local result was **166 passed, 12 skipped, and 2 failed**; the skips are opt-in network/browser checks, while the failures are reporting-artifact expectation failures. The tests exercise cleaning/pipeline models, market adapters, DeepAgent tools and DB-driven workflow contracts, Midas DB services, MCP registration, CLI/TUI wiring, and sessions. No coverage percentage is claimed because the repository does not publish a coverage report or threshold. The same validation run reported **6 ruff lint errors**, primarily import ordering plus one line-length violation.
+The suite contains **25** `tests/test_*.py` modules. On **2026-08-27**, default `pytest` collected **183** tests and finished in about **9 s** locally: **169 passed**, **12 skipped** (gated behind `MIDAS_RUN_INTEGRATION=1` for live network/browser/PDF checks), and **2 failed** in [`tests/test_reporting.py`](./tests/test_reporting.py) (reporting-artifact expectation drift). Coverage includes cleaning/pipeline models, market adapters, DeepAgent tools and DB-driven workflow contracts, Midas DB services (including trade proposals), MCP registration and URL scrubbing, CLI/TUI wiring, and sessions. No coverage percentage is published. The same environment reported **7** `ruff` lint errors (**6** auto-fixable). There is no checked-in load-test or latency benchmark harness.
 
 ---
 
@@ -458,8 +483,9 @@ The suite contains **24 test modules** and collected **180 test cases** in the c
 | Command | Purpose |
 | --- | --- |
 | `midas` | One-shot research CLI |
-| `midas-tui` | Interactive Textual app |
-| `midas-mcp` | Market-info MCP (stdio) |
+| `midas-tui` | Deprecated Textual app (prefer Nilo) |
+| `equity-data-mcp` | Generic market-info MCP (stdio; URLs scrubbed) |
+| `midas-mcp` | Deprecated alias of `equity-data-mcp` |
 | `midas-db-mcp` | Midas DB MCP (stdio) |
 | `midas-db-migrate` | Apply SQLite migrations |
 
@@ -480,7 +506,7 @@ The suite contains **24 test modules** and collected **180 test cases** in the c
 
 **No warranties; use at your own risk.** The software and any data it retrieves are provided “as is,” without warranty of accuracy, completeness, timeliness, or fitness for a particular purpose. Market data can be delayed, incomplete, misparsed, or wrong. Do not rely on tool output as a sole basis for trading or compliance decisions.
 
-**Paper portfolios are not brokerage.** Deposits, buys, and sells recorded in Midas DB are demo ledger events only. They do not place orders or move real capital.
+**Paper portfolios are not brokerage.** Deposits and proposal-executed buys/sells in Midas DB are demo ledger events only. They do not place orders or move real capital.
 
 **Third-party data and terms.** Midas may fetch information from public web pages, exchanges, and other third-party services. Those sources are not affiliated with this project. Comply with each provider’s terms, robots rules, rate limits, and applicable law. This repository does **not** grant any license to third-party content or trademarks.
 

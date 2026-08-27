@@ -1,0 +1,42 @@
+{
+  "appName": "Midas",
+  "logo": "midas.png",
+  "welcome": {
+    "title": "What is the mandate?",
+    "body": "Midas is a local desk for listed-equity research and paper portfolios. Open a mandate, start a book, or inspect one already on {workspace}.",
+    "prompts": [
+      {
+        "label": "Open a book",
+        "prompt": "Create a new named paper portfolio. Ask me for a unique name, starting capital, and any risk, market-cap, sector, exclusion, or custom rules. Parse those into policy, fund the book with a deposit in Midas DB via midas-db-mcp, and stop at a DRAFT initial-holdings proposal if research is in scope. Do not execute trades until I approve that exact proposal ID."
+      },
+      {
+        "label": "Research a stock",
+        "prompt": "Start a single-stock equity-research run. Before creating anything, ask me for the company, my exact investment horizon, and my explicit risk appetite or loss tolerance — preserve my wording and do not assume either. Then follow the Midas single-stock workflow: evidence via equity-data-mcp + native web tools; persist mandate, evidence, and IC report in Midas DB via midas-db-mcp."
+      },
+      {
+        "label": "Compare names",
+        "prompt": "Start a named-comparison research run for two to five companies I will name. Ask first for the names, my exact investment horizon, and my explicit risk appetite. Follow the Midas comparison workflow, keep the run isolated, gather evidence via equity-data-mcp + web tools, and persist mandate, evidence, and report in Midas DB via midas-db-mcp."
+      },
+      {
+        "label": "Screen a universe",
+        "prompt": "Start a broad-universe research run. Ask first for the universe or screen, my exact investment horizon, and my explicit risk appetite. You own the initial sweep, shortlist, and every funnel exclusion. Use equity-data-mcp for market evidence and persist the mandate, evidence, and report in Midas DB via midas-db-mcp."
+      },
+      {
+        "label": "Inspect a book",
+        "prompt": "Load a named paper portfolio from Midas DB (midas-db-mcp) and summarize cash, holdings, investment cases, open proposals, and recent performance. Resolve the book in the database — do not scan the filesystem for research. Ask which book if I have not named one."
+      },
+      {
+        "label": "Refresh performance",
+        "prompt": "Run a performance refresh for a named paper portfolio. Ask which book if I have not named one. Pull current prices through equity-data-mcp / authorized market tools, update Midas DB via midas-db-mcp, and report P&L, weights, and cash. Do not draft or execute trades."
+      },
+      {
+        "label": "Propose a rebalance",
+        "prompt": "Draft a rebalance proposal for a named paper portfolio in Midas DB. Ask which book if I have not named one. Show the proposed trades, cash impact, and policy fit. Persist the draft via midas-db-mcp trade_proposal tools. Do not execute anything — wait for me to approve a specific proposal ID."
+      },
+      {
+        "label": "Validate a thesis",
+        "prompt": "Run thesis validation for a holding in a named paper portfolio. Ask which book and which name if I have not said. Compare the live Midas DB case against new evidence in a fresh research run (equity-data-mcp + midas-db-mcp), then report what still holds, what broke, and whether the case should stay, be revised, or be closed."
+      }
+    ]
+  }
+}

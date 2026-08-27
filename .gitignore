@@ -5,11 +5,35 @@ __pycache__/
 .ruff_cache/
 dist/
 *.py[cod]
+
+# Local research / run artifacts — never commit
 output/
-output/research/
+*.pdf
+
 # Midas DB local SQLite (paper portfolios + research runs)
 midas.db
 midas.db-wal
 midas.db-shm
 *.db-wal
 *.db-shm
+*.sqlite3
+*.sqlite
+
+# Sessions / caches
+.midas-sessions.sqlite3
+
+# Nilo runtime
+.nilo/userdata/
+.nilo/worktrees/
+
+# Machine-local overrides (absolute paths, private MCP hosts)
+.codex/config.local.toml
+.grok/config.local.toml
+opencode.local.json
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

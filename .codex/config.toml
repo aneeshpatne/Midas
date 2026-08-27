@@ -1,0 +1,20 @@
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[features.multi_agent_v2]
+hide_spawn_agent_metadata = false
+tool_namespace = "agents"
+
+[agents]
+enabled = true
+
+# Generic market MCP — responses are scrubbed of external URLs on the wire.
+[mcp_servers.equity-data]
+command = "uv"
+args = ["run", "equity-data-mcp"]
+tool_timeout_sec = 180
+
+[mcp_servers.midas-db]
+command = "uv"
+args = ["run", "midas-db-mcp"]
+tool_timeout_sec = 60

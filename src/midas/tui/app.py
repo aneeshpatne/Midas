@@ -1013,5 +1013,24 @@ class MidasApp(App[None]):
 
 
 def main() -> None:
-    """Launch the interactive Midas terminal interface."""
+    """Launch the interactive Midas terminal interface.
+
+    Deprecated: prefer the Nilo Electron client with this repo as the workspace
+    (Codex / Grok / OpenCode / Deep Agents via ``.nilo/`` + MCP). ``midas-tui``
+    remains available temporarily but will be removed.
+    """
+    import sys
+    import warnings
+
+    warnings.warn(
+        "midas-tui is deprecated and will be removed; use Nilo with this "
+        "workspace instead (equity-data + midas-db MCP).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    print(
+        "DEPRECATED: midas-tui is sunset-bound. Prefer Nilo (Codex/Grok/OpenCode) "
+        "with this repository as the workspace.",
+        file=sys.stderr,
+    )
     MidasApp().run()

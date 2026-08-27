@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "equity-data": {
+      "type": "local",
+      "command": ["uv", "run", "equity-data-mcp"],
+      "timeout": 180000
+    },
+    "midas-db": {
+      "type": "local",
+      "command": ["uv", "run", "midas-db-mcp"],
+      "timeout": 60000
+    }
+  }
+}

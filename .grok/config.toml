@@ -1,0 +1,10 @@
+# Generic market MCP — responses are scrubbed of external URLs on the wire.
+[mcp_servers.equity-data]
+command = "uv"
+args = ["run", "equity-data-mcp"]
+enabled = true
+
+[mcp_servers.midas-db]
+command = "uv"
+args = ["run", "midas-db-mcp"]
+enabled = true
