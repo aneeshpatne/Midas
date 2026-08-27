@@ -27,7 +27,9 @@ from midas.db.models import (
     CreateResearchRunInput,
     CreateSecurityInput,
     CreateThesisRevisionInput,
+    CreateTradeProposalInput,
     CreateTransactionInput,
+    ProposedTrade,
     UpdateCompanyInput,
     UpdateInvestmentCaseInput,
     UpdatePortfolioInput,
@@ -44,6 +46,7 @@ from midas.db.services import (
     research_runs_service,
     securities_service,
     thesis_revisions_service,
+    trade_proposals_service,
     transactions_service,
 )
 
@@ -837,6 +840,95 @@ def market_price_latest(security_id: str) -> str:
     return _run(lambda: market_prices_service.latest(security_id))
 
 
+@tool("thesis_revision_get_latest")
+def thesis_revision_get_latest(investment_case_id: str) -> str:
+    """Latest thesis revision for an investment case."""
+    return _run(lambda: thesis_revisions_service.get_latest(investment_case_id))
+
+
+@tool("trade_proposal_create")
+def trade_proposal_create(
+    portfolio_id: str,
+    trades: list[dict[str, Any]],
+    price_as_of: int,
+    rationale: str | None = None,
+    warnings: list[str] | None = None,
+    expires_at: int | None = None,
+    id: str | None = None,
+) -> str:
+    """Persist a DRAFT paper-trade proposal (does not change holdings)."""
+    return _run(
+        lambda: trade_proposals_service.create(
+            CreateTradeProposalInput(
+                id=id,
+                portfolio_id=portfolio_id,
+                trades=[ProposedTrade.model_validate(t) for t in trades],
+                rationale=rationale,
+                warnings=warnings,
+                price_as_of=price_as_of,
+                expires_at=expires_at,
+            )
+        )
+    )
+
+
+@tool("trade_proposal_get")
+def trade_proposal_get(id: str) -> str:
+    """Get a paper-trade proposal by id."""
+    return _run(lambda: trade_proposals_service.get_by_id(id))
+
+
+@tool("trade_proposal_list")
+def trade_proposal_list(
+    portfolio_id: str,
+    status: Literal[
+        "DRAFT", "APPROVED", "REJECTED", "SUPERSEDED", "EXECUTED"
+    ]
+    | None = None,
+) -> str:
+    """List proposals for a portfolio."""
+    return _run(
+        lambda: trade_proposals_service.list_by_portfolio(portfolio_id, status)
+    )
+
+
+@tool("trade_proposal_approve")
+def trade_proposal_approve(id: str, approved_at: int | None = None) -> str:
+    """Approve a DRAFT proposal after explicit user confirmation of that ID."""
+    return _run(lambda: trade_proposals_service.approve(id, approved_at))
+
+
+@tool("trade_proposal_reject")
+def trade_proposal_reject(id: str, rejected_at: int | None = None) -> str:
+    """Reject a DRAFT proposal."""
+    return _run(lambda: trade_proposals_service.reject(id, rejected_at))
+
+
+@tool("trade_proposal_supersede")
+def trade_proposal_supersede(
+    id: str, superseded_at: int | None = None
+) -> str:
+    """Supersede a DRAFT proposal."""
+    return _run(lambda: trade_proposals_service.supersede(id, superseded_at))
+
+
+@tool("trade_proposal_execute")
+def trade_proposal_execute(id: str, executed_at: int) -> str:
+    """Execute an APPROVED proposal atomically into the ledger."""
+    return _run(lambda: trade_proposals_service.execute(id, executed_at))
+
+
+@tool("research_unlink_portfolio")
+def research_unlink_portfolio(link_id: str) -> str:
+    """Remove a research↔portfolio link."""
+    return _run(
+        lambda: (
+            research_runs_service.unlink_from_portfolio(link_id),
+            {"deleted": True, "id": link_id},
+        )[1]
+    )
+
+
 MIDAS_DB_TOOLS: tuple[BaseTool, ...] = (
     research_run_create,
     research_run_get,
@@ -852,6 +944,7 @@ MIDAS_DB_TOOLS: tuple[BaseTool, ...] = (
     research_evidence_append,
     research_evidence_list,
     research_link_portfolio,
+    research_unlink_portfolio,
     company_create,
     company_get,
     company_list,
@@ -874,8 +967,16 @@ MIDAS_DB_TOOLS: tuple[BaseTool, ...] = (
     investment_case_update,
     thesis_revision_create,
     thesis_revision_list,
+    thesis_revision_get_latest,
     transaction_create,
     transaction_list,
     market_price_upsert,
     market_price_latest,
+    trade_proposal_create,
+    trade_proposal_get,
+    trade_proposal_list,
+    trade_proposal_approve,
+    trade_proposal_reject,
+    trade_proposal_supersede,
+    trade_proposal_execute,
 )

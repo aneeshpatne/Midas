@@ -144,6 +144,19 @@ class ThesisRevisionsRepository:
         )
         return [ThesisRevision.model_validate(r) for r in fetchall_dicts(cur)]
 
+    def find_latest(self, investment_case_id: str) -> ThesisRevision | None:
+        cur = conn().execute(
+            """
+            SELECT * FROM thesis_revisions
+            WHERE investment_case_id = ?
+            ORDER BY revision_number DESC
+            LIMIT 1
+            """,
+            (investment_case_id,),
+        )
+        row = fetchone_dict(cur)
+        return ThesisRevision.model_validate(row) if row else None
+
     def next_revision_number(self, investment_case_id: str) -> int:
         cur = conn().execute(
             """

@@ -13,6 +13,7 @@ from midas.db.services import (
     research_runs_service,
     securities_service,
     thesis_revisions_service,
+    trade_proposals_service,
     transactions_service,
 )
 
@@ -36,5 +37,6 @@ __all__ = [
     "run_migrations",
     "securities_service",
     "thesis_revisions_service",
+    "trade_proposals_service",
     "transactions_service",
 ]

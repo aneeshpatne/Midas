@@ -30,6 +30,10 @@ from midas.db.repositories.securities import (
     SecuritiesRepository,
     securities_repository,
 )
+from midas.db.repositories.trade_proposals import (
+    TradeProposalsRepository,
+    trade_proposals_repository,
+)
 from midas.db.repositories.transactions import (
     MarketPricesRepository,
     TransactionsRepository,
@@ -49,6 +53,7 @@ __all__ = [
     "ResearchRunsRepository",
     "SecuritiesRepository",
     "ThesisRevisionsRepository",
+    "TradeProposalsRepository",
     "TransactionsRepository",
     "companies_repository",
     "investment_cases_repository",
@@ -61,5 +66,6 @@ __all__ = [
     "research_runs_repository",
     "securities_repository",
     "thesis_revisions_repository",
+    "trade_proposals_repository",
     "transactions_repository",
 ]

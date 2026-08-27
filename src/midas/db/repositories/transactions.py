@@ -131,7 +131,11 @@ class TransactionsRepository:
         return int(row["total_withdrawals_paise"] if row else 0)
 
     def create(
-        self, input_: CreateTransactionInput, *, cash_effect_paise: int
+        self,
+        input_: CreateTransactionInput,
+        *,
+        cash_effect_paise: int,
+        commit: bool = True,
     ) -> Transaction:
         id_ = input_.id or new_id()
         ts = now_ms()
@@ -139,12 +143,12 @@ class TransactionsRepository:
             """
             INSERT INTO transactions (
               id, portfolio_id, account_id, security_id, investment_case_id,
-              type, quantity_micros, price_paise, gross_amount_paise,
+              proposal_id, type, quantity_micros, price_paise, gross_amount_paise,
               fees_paise, taxes_paise, net_amount_paise, cash_effect_paise,
               currency, exchange_rate_micros, executed_at, settlement_date,
               external_reference, notes, created_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -153,6 +157,7 @@ class TransactionsRepository:
                 input_.account_id,
                 input_.security_id,
                 input_.investment_case_id,
+                input_.proposal_id,
                 input_.type,
                 input_.quantity_micros,
                 input_.price_paise,
@@ -170,7 +175,8 @@ class TransactionsRepository:
                 ts,
             ),
         )
-        conn().commit()
+        if commit:
+            conn().commit()
         created = self.find_by_id(id_)
         if not created:
             raise RuntimeError(f"Failed to create transaction: {id_}")

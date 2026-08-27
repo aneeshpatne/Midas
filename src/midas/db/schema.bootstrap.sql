@@ -1,6 +1,6 @@
 -- Midas DB — full bootstrap for replication
 -- Engine: SQLite 3 (STRICT tables)
--- Source of truth: src/midas/db/migrate.py (versions 1–3)
+-- Source of truth: src/midas/db/migrate.py (versions 1–4)
 --
 -- Usage:
 --   sqlite3 midas.db < src/midas/db/schema.bootstrap.sql
@@ -274,6 +274,31 @@ CREATE INDEX thesis_revisions_case_idx
   ON thesis_revisions(investment_case_id, revision_number DESC);
 
 -- ---------------------------------------------------------------------------
+-- Approval-gated paper trade proposals
+-- ---------------------------------------------------------------------------
+CREATE TABLE trade_proposals (
+  id TEXT PRIMARY KEY,
+  portfolio_id TEXT NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'DRAFT'
+    CHECK (status IN ('DRAFT','APPROVED','REJECTED','SUPERSEDED','EXECUTED')),
+  trades_json TEXT NOT NULL CHECK (json_valid(trades_json)),
+  rationale TEXT,
+  warnings_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(warnings_json)),
+  price_as_of INTEGER NOT NULL,
+  expires_at INTEGER,
+  approved_at INTEGER,
+  rejected_at INTEGER,
+  superseded_at INTEGER,
+  executed_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX trade_proposals_portfolio_idx
+  ON trade_proposals(portfolio_id, created_at DESC);
+CREATE INDEX trade_proposals_status_idx ON trade_proposals(status);
+
+-- ---------------------------------------------------------------------------
 -- Transaction ledger (cash + positions; source of truth for holdings)
 -- ---------------------------------------------------------------------------
 CREATE TABLE transactions (
@@ -283,6 +308,7 @@ CREATE TABLE transactions (
   account_id TEXT,
   security_id TEXT,
   investment_case_id TEXT,
+  proposal_id TEXT,
 
   type TEXT NOT NULL
     CHECK (
@@ -361,6 +387,10 @@ CREATE TABLE transactions (
     REFERENCES investment_cases(id)
     ON DELETE SET NULL,
 
+  FOREIGN KEY (proposal_id)
+    REFERENCES trade_proposals(id)
+    ON DELETE RESTRICT,
+
   CHECK (
     type NOT IN (
       'BUY',
@@ -406,6 +436,7 @@ CREATE INDEX transactions_security_date_idx
   ON transactions(security_id, executed_at DESC);
 CREATE INDEX transactions_investment_case_idx
   ON transactions(investment_case_id);
+CREATE INDEX transactions_proposal_idx ON transactions(proposal_id);
 CREATE INDEX transactions_account_idx
   ON transactions(account_id);
 
@@ -628,10 +659,11 @@ CREATE INDEX research_portfolio_links_portfolio_idx
 CREATE INDEX research_portfolio_links_case_idx
   ON research_portfolio_links(investment_case_id);
 
--- Mark all migrations as applied (matches migrate.py versions 1–3).
+-- Mark all migrations as applied (matches migrate.py versions 1–4).
 INSERT INTO schema_migrations (version, name, applied_at) VALUES
   (1, 'create_portfolio_schema', CAST(strftime('%s', 'now') AS INTEGER) * 1000),
   (2, 'create_research_schema', CAST(strftime('%s', 'now') AS INTEGER) * 1000),
-  (3, 'create_companies_and_link_securities', CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+  (3, 'create_companies_and_link_securities', CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  (4, 'add_trade_proposals', CAST(strftime('%s', 'now') AS INTEGER) * 1000);
 
 COMMIT;

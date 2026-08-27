@@ -15,6 +15,10 @@ from midas.db.services.portfolios import (
 )
 from midas.db.services.research import ResearchRunsService, research_runs_service
 from midas.db.services.securities import SecuritiesService, securities_service
+from midas.db.services.trade_proposals import (
+    TradeProposalsService,
+    trade_proposals_service,
+)
 from midas.db.services.transactions import (
     MarketPricesService,
     TransactionsService,
@@ -32,6 +36,7 @@ __all__ = [
     "ResearchRunsService",
     "SecuritiesService",
     "ThesisRevisionsService",
+    "TradeProposalsService",
     "TransactionsService",
     "companies_service",
     "compute_cash_effect_paise",
@@ -42,5 +47,6 @@ __all__ = [
     "research_runs_service",
     "securities_service",
     "thesis_revisions_service",
+    "trade_proposals_service",
     "transactions_service",
 ]

@@ -215,6 +215,30 @@ class ResearchRunsService:
             payload_json=payload_json,
         )
 
+    def append_evidence_many(
+        self,
+        research_run_id: str,
+        records: list[AppendResearchEvidenceInput],
+    ) -> list[ResearchEvidence]:
+        self.get_by_id(research_run_id)
+        if not records:
+            raise ValidationError("records must be a non-empty array")
+        return [
+            self.append_evidence(
+                AppendResearchEvidenceInput(
+                    id=record.id,
+                    research_run_id=research_run_id,
+                    record_type=record.record_type,
+                    record_id=record.record_id,
+                    payload=record.payload,
+                    as_of=record.as_of,
+                    security_id=record.security_id,
+                    symbol=record.symbol,
+                )
+            )
+            for record in records
+        ]
+
     def list_evidence(
         self,
         research_run_id: str,

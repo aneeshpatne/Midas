@@ -35,6 +35,7 @@ from midas.db.connection import configure, get_db_path
 from midas.db.errors import MidasDbError
 from midas.db.helpers import now_ms
 from midas.db.migrate import run_migrations
+from midas.mcp_sanitize import sanitize_for_mcp, scrub_text
 from midas.db.models import (
     AddResearchRunSecurityInput,
     AppendResearchEvidenceInput,
@@ -46,7 +47,9 @@ from midas.db.models import (
     CreateResearchRunInput,
     CreateSecurityInput,
     CreateThesisRevisionInput,
+    CreateTradeProposalInput,
     CreateTransactionInput,
+    ProposedTrade,
     UpdateCompanyInput,
     UpdateInvestmentCaseInput,
     UpdatePortfolioAccountInput,
@@ -64,13 +67,14 @@ from midas.db.services import (
     research_runs_service,
     securities_service,
     thesis_revisions_service,
+    trade_proposals_service,
     transactions_service,
 )
 
 _SERVER_INSTRUCTIONS = """\
 Midas DB tools for paper portfolios, securities master, investment cases,
-thesis revisions, cash/trade ledger, market prices, and DB-backed equity
-research runs.
+thesis revisions, cash/trade ledger, approval-gated trade proposals, market
+prices, and DB-backed equity research runs.
 
 All tools return compact JSON with an ``ok`` field. Check ``ok`` before trusting
 the payload. Money amounts are integer paise (₹1 = 100 paise). Share quantities
@@ -80,6 +84,8 @@ Prefer:
 - company_create / security_create for master data
 - portfolio_create + account_create + deposit (transaction_create DEPOSIT)
 - investment_case_create + thesis_revision_create for thesis work
+- trade_proposal_create → user approval of ID → trade_proposal_approve →
+  trade_proposal_execute for BUY/SELL (never transaction_create for trades)
 - research_run_create / research_evidence_append for diligence ledgers
 - research_link_portfolio only after a run is finished when admitting names
 
@@ -98,13 +104,21 @@ def _dump(obj: Any) -> Any:
 
 
 def _ok(data: Any) -> str:
-    return json.dumps({"ok": True, "data": _dump(data)}, indent=2, default=str)
+    # Scrub URL fields/strings before they leave the MCP process.
+    return json.dumps(
+        {"ok": True, "data": sanitize_for_mcp(_dump(data))},
+        indent=2,
+        default=str,
+    )
 
 
 def _fail(error: BaseException) -> str:
     name = type(error).__name__
     return json.dumps(
-        {"ok": False, "error": {"name": name, "message": str(error)}},
+        {
+            "ok": False,
+            "error": {"name": name, "message": scrub_text(str(error))},
+        },
         indent=2,
     )
 
@@ -622,6 +636,21 @@ def create_db_mcp_server() -> FastMCP:
         """Get a thesis revision by id."""
         return _run(lambda: thesis_revisions_service.get_by_id(id))
 
+    @server.tool()
+    def thesis_revision_get_latest(investment_case_id: str) -> str:
+        """Get the latest thesis revision for an investment case (or null)."""
+        return _run(lambda: thesis_revisions_service.get_latest(investment_case_id))
+
+    @server.tool()
+    def thesis_revision_delete(id: str) -> str:
+        """Delete a thesis revision by id."""
+        return _run(
+            lambda: (
+                thesis_revisions_service.delete(id),
+                {"deleted": True, "id": id},
+            )[1]
+        )
+
     # --- Transactions ---
     @server.tool()
     def transaction_create(
@@ -658,7 +687,7 @@ def create_db_mcp_server() -> FastMCP:
         notes: str | None = None,
         id: str | None = None,
     ) -> str:
-        """Record a cash or position ledger event. cash_effect derived if omitted."""
+        """Record a cash or non-trade ledger event. BUY/SELL require trade_proposal_execute."""
         return _run(
             lambda: transactions_service.create(
                 CreateTransactionInput(
@@ -1019,6 +1048,189 @@ def create_db_mcp_server() -> FastMCP:
         """List research↔portfolio links for a portfolio."""
         return _run(
             lambda: research_runs_service.list_links_by_portfolio(portfolio_id)
+        )
+
+    @server.tool()
+    def research_links_by_run(research_run_id: str) -> str:
+        """List research↔portfolio links for a research run."""
+        return _run(
+            lambda: research_runs_service.list_portfolio_links(research_run_id)
+        )
+
+    @server.tool()
+    def research_links_by_case(investment_case_id: str) -> str:
+        """List research↔portfolio links for an investment case."""
+        return _run(
+            lambda: research_runs_service.list_links_by_investment_case(
+                investment_case_id
+            )
+        )
+
+    @server.tool()
+    def research_unlink_portfolio(link_id: str) -> str:
+        """Remove a research↔portfolio link."""
+        return _run(
+            lambda: (
+                research_runs_service.unlink_from_portfolio(link_id),
+                {"deleted": True, "id": link_id},
+            )[1]
+        )
+
+    @server.tool()
+    def research_security_remove(id: str) -> str:
+        """Remove a security attachment from a research run."""
+        return _run(
+            lambda: (
+                research_runs_service.remove_security(id),
+                {"deleted": True, "id": id},
+            )[1]
+        )
+
+    @server.tool()
+    def research_run_delete(id: str) -> str:
+        """Delete a research run and its evidence/links."""
+        return _run(
+            lambda: (
+                research_runs_service.delete(id),
+                {"deleted": True, "id": id},
+            )[1]
+        )
+
+    @server.tool()
+    def research_evidence_append_many(
+        research_run_id: str,
+        records: list[dict[str, Any]],
+    ) -> str:
+        """Append multiple evidence records to a research run in order."""
+        return _run(
+            lambda: research_runs_service.append_evidence_many(
+                research_run_id,
+                [
+                    AppendResearchEvidenceInput(
+                        research_run_id=research_run_id,
+                        record_type=str(rec["record_type"]),
+                        payload=rec.get("payload", {}),
+                        id=rec.get("id"),
+                        record_id=rec.get("record_id"),
+                        as_of=rec.get("as_of"),
+                        security_id=rec.get("security_id"),
+                        symbol=rec.get("symbol"),
+                    )
+                    for rec in records
+                ],
+            )
+        )
+
+    # --- Trade proposals ---
+    @server.tool()
+    def trade_proposal_create(
+        portfolio_id: str,
+        trades: list[dict[str, Any]],
+        price_as_of: int,
+        rationale: str | None = None,
+        warnings: list[str] | None = None,
+        expires_at: int | None = None,
+        id: str | None = None,
+    ) -> str:
+        """Persist a DRAFT paper-trade proposal. Does not change cash or holdings."""
+        return _run(
+            lambda: trade_proposals_service.create(
+                CreateTradeProposalInput(
+                    id=id,
+                    portfolio_id=portfolio_id,
+                    trades=[ProposedTrade.model_validate(t) for t in trades],
+                    rationale=rationale,
+                    warnings=warnings,
+                    price_as_of=price_as_of,
+                    expires_at=expires_at,
+                )
+            )
+        )
+
+    @server.tool()
+    def trade_proposal_get(id: str) -> str:
+        """Get a paper-trade proposal and its current persisted status."""
+        return _run(lambda: trade_proposals_service.get_by_id(id))
+
+    @server.tool()
+    def trade_proposal_list(
+        portfolio_id: str,
+        status: Literal[
+            "DRAFT", "APPROVED", "REJECTED", "SUPERSEDED", "EXECUTED"
+        ]
+        | None = None,
+    ) -> str:
+        """List proposals for a portfolio, optionally filtered by status."""
+        return _run(
+            lambda: trade_proposals_service.list_by_portfolio(
+                portfolio_id, status
+            )
+        )
+
+    @server.tool()
+    def trade_proposal_approve(
+        id: str, approved_at: int | None = None
+    ) -> str:
+        """Persist explicit user approval for a DRAFT proposal ID."""
+        return _run(
+            lambda: trade_proposals_service.approve(id, approved_at)
+        )
+
+    @server.tool()
+    def trade_proposal_reject(
+        id: str, rejected_at: int | None = None
+    ) -> str:
+        """Reject a DRAFT proposal."""
+        return _run(lambda: trade_proposals_service.reject(id, rejected_at))
+
+    @server.tool()
+    def trade_proposal_supersede(
+        id: str, superseded_at: int | None = None
+    ) -> str:
+        """Supersede a DRAFT proposal after creating a refreshed replacement."""
+        return _run(
+            lambda: trade_proposals_service.supersede(id, superseded_at)
+        )
+
+    @server.tool()
+    def trade_proposal_execute(id: str, executed_at: int) -> str:
+        """Atomically record every trade in one APPROVED proposal as EXECUTED."""
+        return _run(
+            lambda: trade_proposals_service.execute(id, executed_at)
+        )
+
+    @server.tool()
+    def market_price_get(security_id: str, price_date: str) -> str:
+        """Get a stored price for a security on YYYY-MM-DD."""
+        return _run(lambda: market_prices_service.get(security_id, price_date))
+
+    @server.tool()
+    def market_price_upsert_many(prices: list[dict[str, Any]]) -> str:
+        """Upsert many daily mark prices."""
+        return _run(
+            lambda: [
+                market_prices_service.upsert(
+                    UpsertMarketPriceInput(
+                        security_id=str(p["security_id"]),
+                        price_date=str(p["price_date"]),
+                        price_paise=int(p["price_paise"]),
+                        currency=str(p.get("currency") or "INR"),
+                        source=p.get("source"),
+                        captured_at=p.get("captured_at"),
+                    )
+                )
+                for p in prices
+            ]
+        )
+
+    @server.tool()
+    def market_price_delete(security_id: str, price_date: str) -> str:
+        """Delete a stored price row."""
+        return _run(
+            lambda: (
+                market_prices_service.delete(security_id, price_date),
+                {"deleted": True, "security_id": security_id, "price_date": price_date},
+            )[1]
         )
 
     return server

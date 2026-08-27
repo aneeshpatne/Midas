@@ -1,4 +1,4 @@
-"""Versioned SQLite migrations for Midas DB (versions 1–3)."""
+"""Versioned SQLite migrations for Midas DB (versions 1–4)."""
 
 from __future__ import annotations
 
@@ -376,6 +376,37 @@ MIGRATIONS: list[Migration] = [
       CREATE INDEX securities_company_idx ON securities(company_id);
         """,
     ),
+    Migration(
+        version=4,
+        name="add_trade_proposals",
+        sql="""
+      CREATE TABLE trade_proposals (
+        id TEXT PRIMARY KEY,
+        portfolio_id TEXT NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'DRAFT'
+          CHECK (status IN ('DRAFT','APPROVED','REJECTED','SUPERSEDED','EXECUTED')),
+        trades_json TEXT NOT NULL CHECK (json_valid(trades_json)),
+        rationale TEXT,
+        warnings_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(warnings_json)),
+        price_as_of INTEGER NOT NULL,
+        expires_at INTEGER,
+        approved_at INTEGER,
+        rejected_at INTEGER,
+        superseded_at INTEGER,
+        executed_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE INDEX trade_proposals_portfolio_idx
+        ON trade_proposals(portfolio_id, created_at DESC);
+      CREATE INDEX trade_proposals_status_idx ON trade_proposals(status);
+
+      ALTER TABLE transactions ADD COLUMN proposal_id TEXT
+        REFERENCES trade_proposals(id) ON DELETE RESTRICT;
+      CREATE INDEX transactions_proposal_idx ON transactions(proposal_id);
+        """,
+    ),
 ]
 
 
@@ -410,7 +441,7 @@ def _apply_migration(conn: sqlite3.Connection, migration: Migration) -> None:
 
 
 def run_migrations(path: str | Path | None = None) -> None:
-    """Apply pending migrations 1–3 to the configured (or given) DB path."""
+    """Apply pending migrations 1–4 to the configured (or given) DB path."""
     if path is not None:
         configure(path)
         close()

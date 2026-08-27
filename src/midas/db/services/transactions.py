@@ -137,6 +137,17 @@ class TransactionsService:
         return transactions_repository.sum_cash_balance_paise(portfolio_id)
 
     def create(self, input_: CreateTransactionInput) -> Transaction:
+        if input_.type in {"BUY", "SELL"}:
+            raise ValidationError(
+                "BUY/SELL must be recorded with trade_proposal_execute "
+                "after explicit approval"
+            )
+        return self.create_approved_trade(input_)
+
+    def create_approved_trade(
+        self, input_: CreateTransactionInput, *, commit: bool = True
+    ) -> Transaction:
+        """Internal entry used by approved-proposal execution (and cash events)."""
         if not portfolios_repository.find_by_id(input_.portfolio_id):
             raise NotFoundError("Portfolio", input_.portfolio_id)
 
@@ -234,6 +245,7 @@ class TransactionsService:
                 account_id=input_.account_id,
                 security_id=input_.security_id,
                 investment_case_id=input_.investment_case_id,
+                proposal_id=input_.proposal_id,
                 type=input_.type,
                 quantity_micros=input_.quantity_micros,
                 price_paise=input_.price_paise,
@@ -249,6 +261,7 @@ class TransactionsService:
                 notes=(input_.notes or "").strip() or None,
             ),
             cash_effect_paise=cash_effect,
+            commit=commit,
         )
 
     def delete(self, id_: str) -> None:

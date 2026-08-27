@@ -46,6 +46,9 @@ ResearchPortfolioLinkRole = Literal[
     "ADMISSION", "CONTEXT", "REBALANCE_INPUT", "THESIS_VALIDATION"
 ]
 Conviction = Literal[1, 2, 3, 4, 5]
+TradeProposalStatus = Literal[
+    "DRAFT", "APPROVED", "REJECTED", "SUPERSEDED", "EXECUTED"
+]
 
 
 class _Model(BaseModel):
@@ -141,12 +144,61 @@ class ThesisRevision(_Model):
     created_at: int
 
 
+class ProposedTrade(_Model):
+    type: Literal["BUY", "SELL"]
+    security_id: str
+    account_id: str | None = None
+    investment_case_id: str | None = None
+    quantity_micros: int
+    price_paise: int
+    fees_paise: int = 0
+    taxes_paise: int = 0
+    currency: str | None = None
+    settlement_date: str | None = None
+    notes: str | None = None
+
+
+class TradeProposal(_Model):
+    id: str
+    portfolio_id: str
+    status: TradeProposalStatus = "DRAFT"
+    trades_json: str
+    rationale: str | None = None
+    warnings_json: str = "[]"
+    price_as_of: int
+    expires_at: int | None = None
+    approved_at: int | None = None
+    rejected_at: int | None = None
+    superseded_at: int | None = None
+    executed_at: int | None = None
+    created_at: int
+    updated_at: int
+
+
+class TradeProposalView(_Model):
+    id: str
+    portfolio_id: str
+    status: TradeProposalStatus
+    trades: list[ProposedTrade]
+    warnings: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    price_as_of: int
+    expires_at: int | None = None
+    approved_at: int | None = None
+    rejected_at: int | None = None
+    superseded_at: int | None = None
+    executed_at: int | None = None
+    created_at: int
+    updated_at: int
+
+
 class Transaction(_Model):
     id: str
     portfolio_id: str
     account_id: str | None = None
     security_id: str | None = None
     investment_case_id: str | None = None
+    proposal_id: str | None = None
     type: TransactionType
     quantity_micros: int | None = None
     price_paise: int | None = None
@@ -379,6 +431,7 @@ class CreateTransactionInput(_Model):
     account_id: str | None = None
     security_id: str | None = None
     investment_case_id: str | None = None
+    proposal_id: str | None = None
     type: TransactionType
     quantity_micros: int | None = None
     price_paise: int | None = None
@@ -393,6 +446,16 @@ class CreateTransactionInput(_Model):
     settlement_date: str | None = None
     external_reference: str | None = None
     notes: str | None = None
+
+
+class CreateTradeProposalInput(_Model):
+    id: str | None = None
+    portfolio_id: str
+    trades: list[ProposedTrade]
+    rationale: str | None = None
+    warnings: list[str] | None = None
+    price_as_of: int
+    expires_at: int | None = None
 
 
 class UpsertMarketPriceInput(_Model):

@@ -21,7 +21,9 @@ from midas.db.models import (
     CreateResearchRunInput,
     CreateSecurityInput,
     CreateThesisRevisionInput,
+    CreateTradeProposalInput,
     CreateTransactionInput,
+    ProposedTrade,
     UpsertMarketPriceInput,
 )
 from midas.db.services import (
@@ -32,6 +34,7 @@ from midas.db.services import (
     research_runs_service,
     securities_service,
     thesis_revisions_service,
+    trade_proposals_service,
     transactions_service,
 )
 from midas.db_mcp_server import create_db_mcp_server
@@ -70,6 +73,7 @@ def test_migrations_create_core_tables(midas_db: Path) -> None:
         "research_evidence",
         "research_run_securities",
         "research_portfolio_links",
+        "trade_proposals",
     } <= tables
     versions = {
         row[0]
@@ -77,7 +81,7 @@ def test_migrations_create_core_tables(midas_db: Path) -> None:
             "SELECT version FROM schema_migrations"
         ).fetchall()
     }
-    assert versions == {1, 2, 3}
+    assert versions == {1, 2, 3, 4}
 
 
 def test_portfolio_deposit_buy_cash_summary(midas_db: Path) -> None:
@@ -109,18 +113,42 @@ def test_portfolio_deposit_buy_cash_summary(midas_db: Path) -> None:
     )
     assert deposit.cash_effect_paise == 10_000_00
 
-    buy = transactions_service.create(
-        CreateTransactionInput(
+    with pytest.raises(ValidationError, match="trade_proposal_execute"):
+        transactions_service.create(
+            CreateTransactionInput(
+                portfolio_id=portfolio.id,
+                security_id=security.id,
+                type="BUY",
+                quantity_micros=1_000_000,
+                price_paise=2_500_00,
+                executed_at=now_ms(),
+            )
+        )
+
+    draft = trade_proposals_service.create(
+        CreateTradeProposalInput(
             portfolio_id=portfolio.id,
-            security_id=security.id,
-            type="BUY",
-            quantity_micros=1_000_000,  # 1 share
-            price_paise=2_500_00,  # ₹2,500
-            executed_at=now_ms(),
+            price_as_of=now_ms(),
+            trades=[
+                ProposedTrade(
+                    type="BUY",
+                    security_id=security.id,
+                    quantity_micros=1_000_000,
+                    price_paise=2_500_00,
+                )
+            ],
         )
     )
+    assert draft.status == "DRAFT"
+    with pytest.raises(ValidationError, match="APPROVED"):
+        trade_proposals_service.execute(draft.id, now_ms())
+    trade_proposals_service.approve(draft.id)
+    result = trade_proposals_service.execute(draft.id, now_ms())
+    assert result["proposal"].status == "EXECUTED"  # type: ignore[union-attr]
+    buy = result["transactions"][0]  # type: ignore[index]
     assert buy.cash_effect_paise == -2_500_00
     assert buy.gross_amount_paise == 2_500_00
+    assert buy.proposal_id == draft.id
 
     summary = portfolios_service.get_cash_summary(portfolio.id)
     assert summary.cash_balance_paise == 7_500_00
@@ -263,6 +291,11 @@ def test_db_mcp_registers_tools(midas_db: Path) -> None:
     assert "research_run_create" in names
     assert "company_create" in names
     assert "security_create" in names
+    assert "trade_proposal_create" in names
+    assert "trade_proposal_execute" in names
+    assert "thesis_revision_get_latest" in names
+    assert "research_evidence_append_many" in names
+    assert "research_unlink_portfolio" in names
 
 
 @pytest.mark.asyncio

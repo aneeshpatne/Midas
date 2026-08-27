@@ -115,6 +115,11 @@ class ThesisRevisionsService:
             raise NotFoundError("InvestmentCase", investment_case_id)
         return thesis_revisions_repository.list_by_case(investment_case_id)
 
+    def get_latest(self, investment_case_id: str) -> ThesisRevision | None:
+        if not investment_cases_repository.find_by_id(investment_case_id):
+            raise NotFoundError("InvestmentCase", investment_case_id)
+        return thesis_revisions_repository.find_latest(investment_case_id)
+
     def create(self, input_: CreateThesisRevisionInput) -> ThesisRevision:
         if not investment_cases_repository.find_by_id(input_.investment_case_id):
             raise NotFoundError("InvestmentCase", input_.investment_case_id)
@@ -127,14 +132,24 @@ class ThesisRevisionsService:
             raise ValidationError("target_price_paise must be non-negative")
         if input_.conviction is not None and not (1 <= input_.conviction <= 5):
             raise ValidationError("conviction must be between 1 and 5")
+        existing = thesis_revisions_repository.list_by_case(
+            input_.investment_case_id
+        )
         rev_no = thesis_revisions_repository.next_revision_number(
             input_.investment_case_id
         )
-        return thesis_revisions_repository.create(
+        revision_type = input_.revision_type if rev_no > 1 else "INITIAL"
+        if rev_no == 1:
+            revision_type = "INITIAL"
+        elif revision_type == "INITIAL" and existing:
+            raise ValidationError(
+                "INITIAL revision_type is only valid for the first revision"
+            )
+        revision = thesis_revisions_repository.create(
             CreateThesisRevisionInput(
                 id=input_.id,
                 investment_case_id=input_.investment_case_id,
-                revision_type=input_.revision_type if rev_no > 1 else "INITIAL",
+                revision_type=revision_type,
                 thesis=input_.thesis.strip(),
                 bull_case=(input_.bull_case or "").strip() or None,
                 base_case=(input_.base_case or "").strip() or None,
@@ -150,6 +165,12 @@ class ThesisRevisionsService:
             ),
             revision_number=rev_no,
         )
+        if input_.conviction is not None:
+            investment_cases_repository.update(
+                input_.investment_case_id,
+                UpdateInvestmentCaseInput(conviction=input_.conviction),
+            )
+        return revision
 
     def delete(self, id_: str) -> None:
         self.get_by_id(id_)
