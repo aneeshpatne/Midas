@@ -57,8 +57,8 @@ retryable true, wait for the in-flight call to finish, then retry; do not start
 another market or same-source tool while one is active.
 
 Not included: general web search, social/X search, or chart generation.
-Prefer company_fundamentals for statements/ratios/peers; market_signals for consensus/SWOT/
-superstars/ASM; NSE tools for live quotes, filings, and market structure.
+Prefer company_fundamentals (Tickertape) for statements/ratios/peers; market_signals for
+consensus/SWOT/superstars/ASM; NSE tools for live quotes, filings, and market structure.
 """
 
 

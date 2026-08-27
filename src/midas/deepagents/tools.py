@@ -536,7 +536,7 @@ async def web_research(query: str, max_results: int = 5) -> str:
 @_source_limited(_SOURCE_FUNDAMENTALS, "company_fundamentals")
 @redis_cached_tool("company_fundamentals", ttl_seconds=_CACHE_TTL_COMPANY_SECONDS)
 async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
-    """Fetch company fundamentals and market data for an NSE symbol.
+    """Fetch company fundamentals and market data for an NSE symbol (Tickertape).
 
     Use for financial statements, ratios, peers, shareholding, company profile, and
     announcements. This intentionally does not download earnings-call transcripts;
@@ -544,7 +544,7 @@ async def company_fundamentals(symbol: str, consolidated: bool = False) -> str:
 
     Args:
         symbol: NSE trading symbol, for example RELIANCE, TCS, or INFY.
-        consolidated: Whether to request consolidated rather than standalone figures.
+        consolidated: Preferred reporting basis (Tickertape is typically consolidated).
     """
     ai_log.info("Fetching company fundamentals for %s", symbol)
     try:
@@ -583,14 +583,15 @@ async def earnings_transcripts(
     limit: int = 2,
     summarize: bool = True,
 ) -> str:
-    """Download and extract recent earnings-call transcripts for a company.
+    """Download and extract recent earnings-call transcripts for a company (Tickertape).
 
     Use this separately from normal company research when the question needs
     management guidance, demand commentary, margins, capex, risks, or Q&A.
+    Transcript PDFs are discovered from Tickertape announcement attachments.
 
     Args:
         symbol: NSE trading symbol, for example RELIANCE, TCS, or INFY.
-        consolidated: Whether to use the consolidated company page for concall links.
+        consolidated: Preferred reporting basis (kept for API compatibility).
         limit: Number of latest unique transcript PDFs to process, from 1 to 5.
         summarize: Summarize extracted PDFs with the configured Ollama model.
     """
