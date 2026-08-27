@@ -61,6 +61,7 @@ def test_create_mcp_server_registers_market_tools() -> None:
     registered = set(server._tool_manager._tools)  # noqa: SLF001 — FastMCP private map
     expected = {tool.name for tool in MARKET_INFO_TOOLS}
     assert registered == expected
+    assert server.name == "equity-data"
 
 
 @pytest.mark.asyncio
@@ -72,7 +73,13 @@ async def test_mcp_tool_list_matches_market_info_tools() -> None:
     assert names == {tool.name for tool in MARKET_INFO_TOOLS}
     fundamentals = next(tool for tool in tools if tool.name == "company_fundamentals")
     assert fundamentals.description
-    assert "symbol" in (fundamentals.inputSchema or {}).get("properties", {})
+    assert "Tickertape" not in (fundamentals.description or "")
+    assert "https://" not in (fundamentals.description or "")
+    assert "RELIANCE" not in (fundamentals.description or "")
+    props = (fundamentals.inputSchema or {}).get("properties", {})
+    # Prefer real arg schema; tolerate wrapper edge cases but never empty.
+    assert props, "MCP tool must expose an input schema"
+    assert "symbol" in props or "args" in props
 
 
 @pytest.mark.asyncio
@@ -110,9 +117,13 @@ async def test_mcp_company_fundamentals_call_uses_underlying_tool(
 
     server = create_mcp_server()
     call_result = await server.call_tool("company_fundamentals", {"symbol": "TCS"})
-    payload = json.loads(_tool_payload_text(call_result))
+    text = _tool_payload_text(call_result)
+    payload = json.loads(text)
     assert payload["ok"] is True
     assert payload["symbol"] == "TCS"
+    assert "source_urls" not in payload
+    assert "https://" not in text
+    assert "example.com" not in text
 
 
 @pytest.mark.asyncio

@@ -31,7 +31,10 @@ dependencies = [
 
 [project.scripts]
 midas = "midas.cli:main"
+# Deprecated — prefer Nilo; entry kept temporarily for compatibility.
 midas-tui = "midas.tui:main"
+# Generic market MCP (server id: equity-data). midas-mcp is a deprecated alias.
+equity-data-mcp = "midas.mcp_server:main"
 midas-mcp = "midas.mcp_server:main"
 midas-db-mcp = "midas.db_mcp_server:main"
 midas-db-migrate = "midas.db.migrate:main"
